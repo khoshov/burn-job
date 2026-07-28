@@ -76,23 +76,91 @@ class LLMAgentLogger:
             f.write(formatted)
 
 
+def find_default_model_path() -> Optional[str]:
+    """Search for existing GGUF model files in the workspace."""
+    candidate_dirs = [
+        os.path.join(REPO_ROOT, "Qwen3-4B "),
+        os.path.join(REPO_ROOT, "Qwen3-4B"),
+        os.path.join(REPO_ROOT, "models"),
+        REPO_ROOT,
+    ]
+    for d in candidate_dirs:
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                if f.endswith(".gguf"):
+                    return os.path.join(d, f)
+    return None
+
+
 class LLMAgent:
-    def __init__(self, model: str = None, api_key: str = None, base_url: str = None, logger: LLMAgentLogger = None):
+    def __init__(
+        self,
+        model: str = None,
+        api_key: str = None,
+        base_url: str = None,
+        model_path: str = None,
+        n_ctx: int = 8192,
+        n_gpu_layers: int = -1,
+        logger: LLMAgentLogger = None,
+    ):
         self.logger = logger or LLMAgentLogger()
+        self.model_path = (
+            model_path
+            or os.getenv("BURN_JOB_MODEL_PATH")
+            or os.getenv("LLAMA_CPP_MODEL_PATH")
+            or os.getenv("GGUF_MODEL_PATH")
+        )
+
+        if not self.model_path:
+            self.model_path = find_default_model_path()
+
+        self.llama_model = None
+        if self.model_path and os.path.exists(self.model_path):
+            self.logger.log("INFO", f"Initializing local llama.cpp engine with model: {self.model_path}")
+            try:
+                from llama_cpp import Llama
+                self.llama_model = Llama(
+                    model_path=self.model_path,
+                    n_ctx=n_ctx,
+                    n_gpu_layers=n_gpu_layers,
+                    verbose=False,
+                )
+                self.logger.log("SUCCESS", f"Local llama.cpp engine initialized (model={os.path.basename(self.model_path)}).")
+            except ImportError:
+                self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
+            except Exception as e:
+                self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
+
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
 
         default_base_url = "https://api.deepseek.com/v1" if (self.api_key and "deepseek" in (base_url or "").lower()) or os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
         self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
 
-        default_model = "deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o"
+        default_model = "qwen3" if self.llama_model else ("deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o")
         self.model = model or os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or default_model
 
     def is_api_configured(self) -> bool:
-        return bool(self.api_key)
+        return (self.llama_model is not None) or bool(self.api_key)
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
+        if self.llama_model is not None:
+            self.logger.log("INFO", "Executing inference via local python llama.cpp (Qwen3)...")
+            try:
+                response = self.llama_model.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=4096,
+                )
+                return response["choices"][0]["message"]["content"]
+            except Exception as e:
+                self.logger.log("ERROR", f"Local llama.cpp execution error: {str(e)}")
+                raise
+
         if not self.is_api_configured():
-            raise ValueError("LLM API Key not provided. Configure OPENAI_API_KEY or use offline mode.")
+            raise ValueError("LLM API Key or local llama.cpp model path not provided. Configure --model-path for local Qwen3 or set OPENAI_API_KEY.")
 
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -300,7 +368,10 @@ def main():
     parser = argparse.ArgumentParser(description="LLM-Based Code Refactoring & Multi-Variant JFR Evaluation Agent")
     parser.add_argument("--report", default="reports/sandbox/findings.json", help="Path to findings JSON report")
     parser.add_argument("--src-dir", default=".", help="Root directory of the target project")
-    parser.add_argument("--model", help="LLM model name (e.g. deepseek-chat, gpt-4o)")
+    parser.add_argument("--model", help="LLM model name (e.g. qwen3, deepseek-chat, gpt-4o)")
+    parser.add_argument("--model-path", help="Path to local GGUF model file for llama.cpp")
+    parser.add_argument("--n-ctx", type=int, default=8192, help="Context window size for local model")
+    parser.add_argument("--n-gpu-layers", type=int, default=-1, help="Number of GPU layers to offload (-1 for all)")
     parser.add_argument("--api-key", help="API key for LLM provider")
     parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
@@ -330,6 +401,16 @@ def main():
 
     logger.log("INFO", f"Loaded {len(findings)} findings from report.")
 
+    agent = LLMAgent(
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        model_path=args.model_path,
+        n_ctx=args.n_ctx,
+        n_gpu_layers=args.n_gpu_layers,
+        logger=logger,
+    )
+
     if args.iterative:
         logger.log("INFO", f"Mode: Iterative Self-Optimization Loop Enabled (max_steps={args.max_steps}).")
         from burn_job.refinement.iterative_loop import run_iterative_loop
@@ -347,13 +428,13 @@ def main():
                 findings=[finding],
                 run_log_path=logger.log_path,
                 verify_mvn=not args.no_verify,
+                agent=agent,
             )
             if res.get("success"):
                 modified_count += 1
         logger.log("INFO", f"Iterative refactoring complete. {modified_count}/{len(findings)} target files optimized.")
         sys.exit(0)
 
-    agent = LLMAgent(model=args.model, api_key=args.api_key, base_url=args.base_url, logger=logger)
     modified_count = 0
 
     for finding in findings:

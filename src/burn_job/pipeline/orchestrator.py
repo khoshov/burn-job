@@ -35,6 +35,7 @@ class AutonomousOrchestrator:
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         offline: bool = True,
         log_path: str = RUN_LOG_PATH,
+        model_path: str = None,
     ):
         self.db_path = db_path
         self.profile_path = profile_path
@@ -42,7 +43,10 @@ class AutonomousOrchestrator:
         self.max_iterations = max_iterations
         self.offline = offline
         self.log_path = log_path
+        self.model_path = model_path
         self.graph_store = KuzuGraphStore(db_path)
+        from burn_job.refinement.agent import LLMAgent
+        self.agent = LLMAgent(model_path=model_path) if not offline or model_path else None
 
     def run(self) -> Dict[str, Any]:
         logger.info("==================================================================")
@@ -101,9 +105,9 @@ class AutonomousOrchestrator:
                 target_file=abs_file,
                 max_steps=self.max_iterations,
                 findings=[finding],
-                offline=self.offline,
                 run_log_path=self.log_path,
                 verify_mvn=True,
+                agent=self.agent,
             )
             if res.get("success"):
                 modified_files += 1

@@ -1,0 +1,7 @@
+# Core dependencies for Performance Optimization Pipeline & Codebase Refactoring Engine
+kuzu
+jinja2
+llama-cpp-python
+
+# Testing dependencies
+pytest>=8.0

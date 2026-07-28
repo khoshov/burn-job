@@ -25,7 +25,13 @@ WEIGHT_GC_ALLOC = 0.1
 
 # LLM Agent settings
 DEFAULT_MAX_ITERATIONS = int(os.environ.get("BURN_JOB_MAX_ITERATIONS", "3"))
-DEFAULT_MODEL = os.environ.get("BURN_JOB_MODEL", "deepseek-coder")
+DEFAULT_MODEL = os.environ.get("BURN_JOB_MODEL", "qwen3")
+DEFAULT_MODEL_PATH = os.environ.get(
+    "BURN_JOB_MODEL_PATH",
+    os.environ.get("LLAMA_CPP_MODEL_PATH", os.path.join(REPO_ROOT, "Qwen3-4B ", "qwen3-4b-instruct.gguf"))
+)
+DEFAULT_N_CTX = int(os.environ.get("BURN_JOB_N_CTX", "8192"))
+DEFAULT_N_GPU_LAYERS = int(os.environ.get("BURN_JOB_N_GPU_LAYERS", "-1"))
 
 @dataclass
 class Config:
@@ -39,3 +45,7 @@ class Config:
     duration_sec: int = DEFAULT_DURATION_SEC
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     model: str = DEFAULT_MODEL
+    model_path: str = DEFAULT_MODEL_PATH
+    n_ctx: int = DEFAULT_N_CTX
+    n_gpu_layers: int = DEFAULT_N_GPU_LAYERS
+

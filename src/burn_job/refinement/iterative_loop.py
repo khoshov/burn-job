@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import Any, Optional
 
 from burn_job.detectors.complexity import analyze_complexity
 
@@ -70,7 +71,8 @@ def score_candidate(code: str, complexity_res: dict) -> float:
 
 
 def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = None,
-                       run_log_path: str = None, verify_mvn: bool = True) -> dict:
+                       run_log_path: str = None, verify_mvn: bool = True,
+                       agent: Any = None) -> dict:
     logger = _SimpleLogger(run_log_path) if run_log_path else None
 
     if not os.path.exists(target_file):
@@ -97,7 +99,17 @@ def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = No
             "complexity_analysis": complexity_result,
             "evaluator_feedback": step_log[-1].get("evaluator_feedback", "") if step_log else "",
         })
-        new_code = prompt
+
+        if agent and hasattr(agent, "call_llm") and agent.is_api_configured():
+            try:
+                llm_res = agent.call_llm(prompt)
+                new_code = agent.extract_code_block(llm_res)
+            except Exception as e:
+                if logger:
+                    logger.log("WARNING", f"LLM call in iterative loop failed: {e}")
+                new_code = current_code
+        else:
+            new_code = prompt
 
         if not new_code or len(new_code.strip()) < 10:
             step_entry["result"] = "generated_code_too_short"

@@ -30,6 +30,7 @@ def main():
     cycle_p.add_argument("--profile", default=DEFAULT_PROFILE_PATH, help="Path to profile file")
     cycle_p.add_argument("--host", default=DEFAULT_HOST, help="Target API host")
     cycle_p.add_argument("--online", action="store_true", help="Enable online LLM API calls")
+    cycle_p.add_argument("--model-path", help="Path to local GGUF model file for llama.cpp")
 
     version_p = subparsers.add_parser("version", help="Print CLI version")
 
@@ -60,6 +61,7 @@ def main():
             profile_path=args.profile,
             host=args.host,
             offline=not args.online,
+            model_path=args.model_path,
         )
         res = orchestrator.run()
         if res.get("success"):

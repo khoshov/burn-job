@@ -110,7 +110,6 @@
 | **`jinja2`** | `>= 3.0.0` | Шаблонизатор промптов для LLM-агента генерации оптимизированных вариантов кода |
 | **`pyyaml`** | `>= 6.0` | Парсинг `graph_rules.yaml` — externalized rule definitions для Cypher-запросов |
 | **`pytest`** *(test)* | `>= 8.0` | Основной фреймворк запуска unit, integration и contract тестов |
-| **`pytest-cov`** *(test)* | `>= 5.0` | Сборщик покрытия кода тестами |
 
 ### Системное окружение и внешние инструменты
 
@@ -922,7 +921,7 @@ Score = 0.6 * ΔLatency_p95 + 0.3 * ΔRPS + 0.1 * ΔGC
 ## 🧪 Запуск тестов
 
 ```bash
-# Все тесты с покрытием
+# Все тесты
 pytest
 
 # Только unit-тесты
@@ -930,12 +929,6 @@ pytest tests/unit/
 
 # Интеграционные + контрактные
 pytest tests/integration/ tests/contract/
-
-# С детальным отчётом по покрытию
-pytest --cov=burn_job --cov-report=term-missing
-
-# Без покрытия
-pytest -v --no-header --cov=
 ```
 
 ### Структура тестов
