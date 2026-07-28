@@ -85,19 +85,7 @@ Autonomous agentic pipeline for static bytecode analysis, dynamic profiler trace
 - [pipeline_context.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/pipeline_context.py) — Контейнер общего состояния выполнения пайплайна (`PipelineContext`, `PipelineStatus`).
 
 #### 3. `burn_job.detectors`
-Движок обнаружения проблем производительности:
-- [base.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/base.py) — Абстрактный базовый класс `BaseDetector`, реализующий `DetectorProtocol`.
-- [rule_engine.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/rule_engine.py) — Движок регистрации и параллельного запуска детекторов.
-- [taxonomy/](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/taxonomy) — 9 классификаторов дефектов (T1–T9):
-  - **T1**: Избыточные вычисления и операции в циклах
-  - **T2**: Неэффективные алгоритмы и структуры данных
-  - **T3**: Некорректное использование библиотечных функций
-  - **T4**: Неоптимальное размещение объектов в памяти
-  - **T5**: Избыточные проверки (Full Fetch vs existence check)
-  - **T6**: N+1 и неоптимальные БД-запросы
-  - **T7**: Утечки памяти (Memory Leaks)
-  - **T8**: Раздувание памяти (Memory Bloat)
-  - **T9**: Горячие точки CPU (CPU Hotspots)
+Движок обнаружения проблем производительности. Комбинирует статический анализ кода (AST/байткод) и динамический Cypher-анализ стектрейсов в KùzuDB.
 
 #### 4. `burn_job.graph`
 Модуль интеграции с встраиваемой графовой СУБД KùzuDB:
@@ -114,6 +102,97 @@ Autonomous agentic pipeline for static bytecode analysis, dynamic profiler trace
 #### 6. `burn_job.cli`
 Единая точка входа для работы из командной строки:
 - [cli.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/cli.py) — Диспетчер команд `scan`, `ingest`, `run-cycle`, `version` с выдачей предупреждений при вызове устаревших параметров.
+
+---
+
+## 🔍 Детализированный механизм работы детекторов (T1–T9)
+
+Детекторы `burn-job` разделены по технологии обнаружения на **Статический анализ (Static AST / Bytecode `javap`)**, **Динамический анализ KùzuDB (Cypher графовые запросы)** и **Гибридный анализ**.
+
+### Сводная таблица способов обнаружения
+
+| Правило таксономии | Название дефекта | Метод обнаружения | Источник данных |
+|-------------------|------------------|-------------------|-----------------|
+| **T1 (RedundantOps)** | Избыточные вычисления в циклах | **Гибридный** (AST + KùzuDB Cypher) | Дерево AST + Граф вызовов KùzuDB |
+| **T2 (InefficientAlgos)** | Алгоритмическая неэффективность $O(N^2)$ | **Гибридный** (AST + KùzuDB Cypher) | Глубина вложенности AST + Сэмплы CPU KùzuDB |
+| **T3 (ImproperFuncUsage)** | Неоптимальные вызовы JDK API | **Статический** (AST / `javap` Bytecode) | Сигнатуры вызовов в Java AST и байткоде |
+| **T4 (DataLayout)** | Раздувание объектов и фрагментация | **Статический** (`javap` Layout Inspection) | Байткод классов Java (`javap -v`) |
+| **T5 (RedundantChecks)** | Полная выгрузка вместо фильтрации/COUNT | **Гибридный** (AST + KùzuDB SQL) | Вызовы JPA/Hibernate AST + Граф запросов KùzuDB |
+| **T6 (DbQueries)** | N+1 проблема SQL-запросов | **Динамический KùzuDB** (Cypher) | Связи `(Method)-[:EXECUTES]->(SqlStatement)` в KùzuDB |
+| **T7 (MemoryLeak)** | Утечки памяти (Unclosed / Monotonic) | **Динамический KùzuDB** (Profiler Allocations) | Трейсы async-profiler (Allocation Mode) в KùzuDB |
+| **T8 (MemoryBloat)** | Массовые короткоживущие объекты | **Гибридный** (AST + KùzuDB Allocations) | Аллокации DTO/JSON в профайлере + AST создание объектов |
+| **T9 (CpuHotspots)** | Горячие точки CPU (>15% self-time) | **Динамический KùzuDB** (Cypher) | Сэмплы CPU узлов `Method` в графе KùzuDB |
+
+---
+
+### Подробный принцип работы каждого анализатора
+
+#### 1. `T1RedundantOpsDetector` (Избыточные операции)
+- **Как работает:**
+  1. **Статическая фаза (AST):** Поисковый алгоритм проходит по узлам циклов (`for`, `while`, `stream().forEach()`) и ищет вычисления инвариантов (например, `list.size()`, `Pattern.compile()`, повторные конкатенации строк, создающие однотипные объекты).
+  2. **Динамическая фаза (KùzuDB):** Запрашивает Cypher-графом узлы методов `MATCH (m:Method) WHERE m.samples > threshold` с высокой частотой вызова внутри узлов-предков циклов.
+  3. **Результат:** Сопоставляет точку вызова в коде с горячей вершиной графа вызовов.
+
+#### 2. `T2InefficientAlgosDetector` (Алгоритмическая неэффективность)
+- **Как работает:**
+  1. **Статическая фаза:** Вычисляет глубину вложенности циклов (Nesting Depth >= 2) и выявляет вызовы с линейной сложностью внутри циклов (например, `list.contains()` или `list.indexOf()` внутри `for`).
+  2. **Динамическая фаза:** Анализирует Cypher-запросом квадратичный рост сэмплов профайлера при увеличении объема входных данных (`MATCH (m:Method) WHERE m.total_time_pct > 20.0`).
+
+#### 3. `T3ImproperFuncUsageDetector` (Некорректное использование функций)
+- **Как работает:**
+  1. **Полностью статический анализ:** Анализирует AST и байткод `javap`.
+  2. Детектирует паттерны:
+     - Использование `String.replaceAll()` вместо `String.replace()` или кэшированного `Pattern.compile()`.
+     - Автоупаковку/распаковку (Autoboxing `Integer` ↔ `int`) в примитивных стримах (`Stream<Integer>` вместо `IntStream`).
+     - Создание промежуточных коллекций `Collectors.toList()` с последующим мгновенным вызовом `.get(0)` или `.size()`.
+
+#### 4. `T4DataLayoutDetector` (Неоптимальная упаковка данных)
+- **Как работает:**
+  1. **Статический анализ байткода (`javap`):** Инспектирует структуру полей классов Java DTO и Entity.
+  2. Вычисляет байтовое выравнивание и выявляет неупакованные примитивы (например, чередование `boolean`, `long`, `int`, выравниваемое JVM до дополнительных 8–16 байт на объект).
+  3. Находит лишние поля-обёртки `java.lang.Boolean` / `java.lang.Long` вместо примитивов.
+
+#### 5. `T5RedundantChecksDetector` (Избыточные проверки)
+- **Как работает:**
+  1. **Гибридный подход:**
+  2. **AST:** Выявляет антипаттерн `repository.findAll().stream().filter(...)` или `repository.findAll().isEmpty()`.
+  3. **KùzuDB:** Выполняет Cypher-запрос к узлам SQL-запросов `MATCH (m:Method)-[:EXECUTES]->(s:SqlStatement) WHERE s.text CONTAINS 'SELECT' AND NOT s.text CONTAINS 'COUNT' AND NOT s.text CONTAINS 'LIMIT'`.
+
+#### 6. `T6DbQueriesDetector` (N+1 Запросы к БД)
+- **Как работает:**
+  1. **Динамический анализ графа KùzuDB:**
+  2. Инжестирует SQL-логи трассировки ORM/Hibernate.
+  3. Выполняет Cypher-запрос:
+     ```cypher
+     MATCH (e:Endpoint)-[:CALLS*]->(m:Method)-[:EXECUTES]->(s:SqlStatement)
+     WITH e, s.pattern AS query_pattern, COUNT(s) AS exec_count
+     WHERE exec_count > 10
+     RETURN e.path, query_pattern, exec_count
+     ```
+  4. Фиксирует генерацию множественных однотипных SQL SELECT-запросов в пределах одного HTTP-запроса.
+
+#### 7. `T7MemoryLeakDetector` (Утечки памяти)
+- **Как работает:**
+  1. **Динамический анализ профайлера (Allocation Mode):**
+  2. Сравнивает несколько заходов нагрузочного теста в KùzuDB (`MATCH (m:Method) WHERE m.allocation_bytes_retained > threshold`).
+  3. Выявляет незакрытые ресурсы (`AutoCloseable`, `InputStream`, `Connection`), статичные коллекции `static List/Map`, растущие без ограничения размера, и нечищенные `ThreadLocal` переменные.
+
+#### 8. `T8MemoryBloatDetector` (Раздувание памяти / GC Pressure)
+- **Как работает:**
+  1. **Гибридный подход:**
+  2. **Profiler:** Идентифицирует методы с наибольшим выделением памяти в секунду (`allocations/sec` > 500 MB/s).
+  3. **AST:** Находит генерацию гигантских промежуточных JSON-дерева/DTO или создание буферов строки огромного размера без предварительного указания емкости `StringBuilder(capacity)`.
+
+#### 9. `T9CpuHotspotsDetector` (Горячие точки CPU)
+- **Как работает:**
+  1. **Динамический анализ Cypher KùzuDB:**
+  2. Выполняет агрегационный Cypher-запрос по графу вызовов:
+     ```cypher
+     MATCH (m:Method)
+     WHERE m.self_cpu_samples / m.total_cpu_samples > 0.15
+     RETURN m.class_name, m.method_name, m.self_cpu_samples
+     ```
+  3. Локализует методы, съедающие более 15% чистого процессорного времени (Self CPU Time).
 
 ---
 
