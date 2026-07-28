@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "burn-job"
+version = "0.1.0"
+description = "Performance Optimization Pipeline & Codebase Refactoring Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "kuzu",
+    "jinja2",
+]
+
+[project.scripts]
+burn-job = "cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
