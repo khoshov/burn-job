@@ -556,23 +556,214 @@ SAVE_IN_LOOP_UNBATCHED, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP, HEAVY_EN
 - Результат: список anomaly-словарей с confidence, evidence_detail, _approaches
 - **LLM не используется** — все детекторы rule-based, ни один не вызывает LLM API
 
-### Этап 6: LLM-цикл рефакторинга 🤖
-- `run_iterative_loop()` в `refinement/iterative_loop.py`
-- Для каждого дефекта генерируется оптимизированный Java-код
-- До `max_iterations` раундов улучшения
-- Использует jinja2-шаблоны промптов
-- **Это единственный этап, где вызывается LLM** — модель, указанная в `BURN_JOB_MODEL` (по умолчанию `deepseek-coder`)
+### Ð­ÑÐ°Ð¿ 6: LLM-ÑÐ¸ÐºÐ» ÑÐµÑÐ°ÐºÑÐ¾ÑÐ¸Ð½Ð³Ð° ð¤
 
-### Этап 7: Maven-верификация ⚙️
-- `mvn test-compile` в директории `java/`
-- Проверка, что рефакторированный код компилируется
-- **LLM не используется** — стандартный вызов Maven CLI
+**Ð¦ÐµÐ»Ñ:** ÐÐ»Ñ ÐºÐ°Ð¶Ð´Ð¾Ð³Ð¾ Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ð¾Ð³Ð¾ Ð´ÐµÑÐµÐºÑÐ° ÑÐ³ÐµÐ½ÐµÑÐ¸ÑÐ¾Ð²Ð°ÑÑ Ð¾Ð¿ÑÐ¸Ð¼Ð¸Ð·Ð¸ÑÐ¾Ð²Ð°Ð½Ð½ÑÐ¹ Java-ÐºÐ¾Ð´, Ð¿ÑÐ¾Ð²ÐµÑÐ¸ÑÑ ÐµÐ³Ð¾ ÐºÐ¾Ð¼Ð¿Ð¸Ð»ÑÑÐ¸Ñ Ð¸ Ð¿ÑÐ¸Ð¼ÐµÐ½Ð¸ÑÑ ÑÐ»ÑÑÑÐµÐ½Ð¸Ñ.
 
-### Этап 8: Оценка и выбор победителя ⚙️
-- `Scorer.evaluate()` вычисляет Score = 0.6 × ΔLatency_p95 + 0.3 × ΔRPS + 0.1 × ΔGC
-- Сохраняет лучший вариант
-- **LLM не используется** — математическая формула без ML
+Ð¦ÐµÐ½ÑÑÐ°Ð»ÑÐ½ÑÐ¹ Ð¼Ð¾Ð´ÑÐ»Ñ: `refinement/iterative_loop.py:run_iterative_loop()`
 
+```
+                 +---------------------------------------------+
+                 |            findings.json (from Step 5)       |
+                 |  [{file, mechanism, pdf_taxonomy, fix, ...}] |
+                 +---------------------+-----------------------+
+                                       |
+             +-------------------------v-----------------------+
+             |          choice: offline vs LLM mode            |
+             |  offline: regex-Ð·Ð°Ð¼ÐµÐ½Ñ       |
+             |  LLM:    jinja2-prompt -> LLM API -> code       |
+             +-------------------------+-----------------------+
+                                       |
+             +-------------------------v-----------------------+
+             |             1-3 iterations of improvement       |
+             |    +----------+   +----------+   +----------+   |
+             |    |iteration |-->|iteration |-->|iteration |   |
+             |    |    1     |   |    2     |   |    3     |   |
+             |    +-----+----+   +----+-----+   +----+-----+   |
+             |          |             |              |          |
+             |          v             v              v          |
+             |    +----------+  +----------+  +----------+      |
+             |    |complexity|  |complexity|  |complexity|      |
+             |    | analysis |  | analysis  |  | analysis |     |
+             |    +----------+  +----------+  +----------+      |
+             |          |             |              |          |
+             |          v             v              v          |
+             |    +----------+  +----------+  +----------+      |
+             |    |  LLM /   |  |  LLM /   |  |  LLM /   |     |
+             |    |  offline |  |  offline  |  |  offline |     |
+             |    |  refactor|  |  refactor |  |  refactor|     |
+             |    +-----+----+  +-----+----+  +-----+----+     |
+             |          |             |              |          |
+             |          v             v              v          |
+             |    +----------+  +----------+  +----------+      |
+             |    |   mvn    |  |   mvn    |  |   mvn    |      |
+             |    |test-comp.|  |test-comp.|  |test-comp.|      |
+             |    +-----+----+  +-----+----+  +-----+----+     |
+             |          |             |              |          |
+             |     pass +--- retry ---+--- fail -----+          |
+             |          |                        3 fails        |
+             |          v                        -> rollback    |
+             |    +----------+                                   |
+             |    |  score   |<--+                               |
+             |    |candidate |                                   |
+             |    +----------+                                   |
+             +--------------------------------------------------+
+                                       |
+                                       v
+                             Refactored Java file
+```
+
+#### ÐÐ²Ð° ÑÐµÐ¶Ð¸Ð¼Ð° ÑÐ°Ð±Ð¾ÑÑ:
+
+**1. Offline mode (Ð±ÐµÐ· LLM)** -- `refinement/iterative_loop.py:offline_refactor_step()`
+
+ÐÑÐ¾ÑÑÐ°Ñ regex-Ð·Ð°Ð¼ÐµÐ½Ð° Ð±ÐµÐ· Ð²ÑÐ·Ð¾Ð²Ð° LLM. ÐÐ¾Ð´ÑÐ¾Ð´Ð¸Ñ Ð´Ð»Ñ Ð´ÐµÐ¼Ð¾/ÑÐµÑÑÐ¾Ð² Ð±ÐµÐ· API-ÐºÐ»ÑÑÐ°:
+
+```python
+# ÐÑÐ¸Ð¼ÐµÑ: SAVE_IN_LOOP_UNBATCHED -> saveAll
+re.sub(
+    r'employeeRepository\.save\((\w+)\);',
+    r'employeesToSave.add(\1);\n  }  // end loop\n    employeeRepository.saveAll(employeesToSave);',
+    result
+)
+# N_PLUS_ONE_QUERIES -> JOIN FETCH comment
+re.sub(
+    r'repository\.findAll\(',
+    r'repository.findAllWithEmployees/* JOIN FETCH */(',
+    result
+)
+```
+
+- ÐÐ¾ÐºÑÑÐ²Ð°ÐµÑ: SAVE_IN_LOOP_UNBATCHED, N_PLUS_ONE_QUERIES, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP
+- ÐÐµ ÑÑÐµÐ±ÑÐµÑ API-key Ð¸ LLM
+
+**2. LLM mode** -- `refinement/agent.py:LLMAgent`
+
+ÐÐµÐ½ÐµÑÐ°ÑÐ¸Ñ ÐºÐ¾Ð´Ð° ÑÐµÑÐµÐ· OpenAI-compatible API:
+
+1. **Ð¡Ð¸ÑÑÐµÐ¼Ð½ÑÐ¹ Ð¿ÑÐ¾Ð¼Ð¿Ñ** (`agent.py:SYSTEM_PROMPT`): Ð¾Ð¿Ð¸ÑÑÐ²Ð°ÐµÑ Ð¿ÑÐ°Ð²Ð¸Ð»Ð° -- ÑÐ¾ÑÑÐ°Ð½ÑÑÑ API-ÐºÐ¾Ð½ÑÑÐ°ÐºÑÑ, Ð½Ðµ ÑÐ´Ð°Ð»ÑÑÑ Ð¿Ð¾Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ, output Ð² ```java Ð±Ð»Ð¾ÐºÐ°Ñ
+2. **ÐÑÐ¾Ð¼Ð¿Ñ Ð¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°ÑÐµÐ»Ñ** (`generator_prompt.jinja2`): ÑÐ¾Ð´ÐµÑÐ¶Ð¸Ñ Ð¸ÑÑÐ¾Ð´Ð½ÑÐ¹ ÐºÐ¾Ð´, findings Ð¸Ð· `findings.json`, complexity-Ð°Ð½Ð°Ð»Ð¸Ð·, feedback Ð¾Ñ evaluator
+3. **ÐÐ·Ð²Ð»ÐµÑÐµÐ½Ð¸Ðµ ÐºÐ¾Ð´Ð°** (`extract_code_block()`): Ð¸Ð· Ð¾ÑÐ²ÐµÑÐ° LLM Ð¿Ð°ÑÑÐ¸ÑÑÑ Ð±Ð»Ð¾Ðº ```java ... ```
+4. **Fallback**: ÐµÑÐ»Ð¸ LLM API Ð½ÐµÐ´Ð¾ÑÑÑÐ¿ÐµÐ½ -- Ð¿ÐµÑÐµÐºÐ»ÑÑÐµÐ½Ð¸Ðµ Ð½Ð° offline mode
+
+ÐÑÐ¾Ð²Ð°Ð¹Ð´ÐµÑÑ: DeepSeek (Ð¿Ð¾ ÑÐ¼Ð¾Ð»ÑÐ°Ð½Ð¸Ñ), OpenAI, Ð»ÑÐ±Ð¾Ð¹ OpenAI-compatible endpoint.
+
+**ÐÐ°ÑÑÑÐ¾Ð¹ÐºÐ° LLM:**
+```bash
+# DeepSeek (Ð¿Ð¾ ÑÐ¼Ð¾Ð»ÑÐ°Ð½Ð¸Ñ)
+export DEEPSEEK_API_KEY=sk-...
+export LLM_MODEL=deepseek-chat
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+export OPENAI_MODEL=gpt-4o
+
+# ÐÐ°ÑÑÐ¾Ð¼Ð½ÑÐ¹ endpoint
+export LLM_API_KEY=...
+export DEEPSEEK_BASE_URL=https://your-endpoint/v1
+```
+
+#### Multi-Variant ÑÐµÐ¶Ð¸Ð¼ (`--multi-variant / --enable-jfr`)
+
+ÐÐ¼ÐµÑÑÐ¾ Ð¾Ð´Ð½Ð¾Ð³Ð¾ Ð²Ð°ÑÐ¸Ð°Ð½ÑÐ° LLM Ð³ÐµÐ½ÐµÑÐ¸ÑÑÐµÑ **3 ÑÐ°Ð·Ð»Ð¸ÑÐ½ÑÑ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°ÑÐ°**, ÐºÐ°Ð¶Ð´ÑÐ¹ Ð¸Ð· ÐºÐ¾ÑÐ¾ÑÑÑ ÑÐµÐ°Ð»Ð¸Ð·ÑÐµÑ ÑÐ°Ð·Ð½ÑÐ¹ Ð¿Ð¾Ð´ÑÐ¾Ð´:
+
+| Defect | VARIANT_1 | VARIANT_2 | VARIANT_3 |
+|--------|-----------|-----------|-----------|
+| N+1 Queries | JOIN FETCH JPQL | @EntityGraph | DTO Projection |
+| In-Memory Filter | PageRequest | Slice (Ð±ÐµÐ· COUNT) | -- |
+| Save in Loop | saveAll batching | -- | -- |
+| Full Entity Fetch | Interface Projection | -- | -- |
+
+**ÐÐµÑÐ°Ð½Ð¸Ð·Ð¼ Ð²ÑÐ±Ð¾ÑÐ° Ð¿Ð¾Ð±ÐµÐ´Ð¸ÑÐµÐ»Ñ Ð¸Ð· ÐºÐ°Ð½Ð´Ð¸Ð´Ð°ÑÐ¾Ð²** (`evaluator.py:evaluate_variant_candidates()`):
+
+1. ÐÑÐ¸Ð¼ÐµÐ½Ð¸ÑÑ ÐºÐ°Ð¶Ð´ÑÐ¹ Ð²Ð°ÑÐ¸Ð°Ð½Ñ Ðº ÑÐ°Ð¹Ð»Ñ (`apply_func`)
+2. ÐÑÐ¾Ð²ÐµÑÐ¸ÑÑ ÑÐ±Ð¾ÑÐºÑ (`verify_func`: `mvn test-compile`) -- Ð¾ÑÑÐµÑÑÑ Ð½ÐµÐºÐ¾Ð¼Ð¿Ð¸Ð»Ð¸ÑÑÐµÐ¼ÑÐµ
+3. ÐÐ°Ð±ÐµÐ½ÑÐ¼Ð°ÑÐ¸ÑÑ ÐºÐ°Ð¶Ð´ÑÐ¹ Ð¿ÑÐ¾ÑÐµÐ´ÑÐ¸Ð¹ Ð²Ð°ÑÐ¸Ð°Ð½Ñ:
+   ```python
+   # evaluator.py:benchmark_endpoint()
+   - avg_latency_ms     # ÑÑÐµÐ´Ð½ÑÑ Ð·Ð°Ð´ÐµÑÐ¶ÐºÐ° endpoint
+   - avg_sql_count      # ÐºÐ¾Ð»Ð¸ÑÐµÑÑÐ²Ð¾ SQL-Ð·Ð°Ð¿ÑÐ¾ÑÐ¾Ð² (Ð¸Ð· X-Sql-Count header)
+   - success_rate       # Ð¿ÑÐ¾ÑÐµÐ½Ñ ÑÑÐ¿ÐµÑÐ½ÑÑ Ð·Ð°Ð¿ÑÐ¾ÑÐ¾Ð²
+   ```
+4. **JFR Ð¿ÑÐ¾ÑÐ¸Ð»Ð¸ÑÐ¾Ð²Ð°Ð½Ð¸Ðµ** (Ð¾Ð¿ÑÐ¸Ð¾Ð½Ð°Ð»ÑÐ½Ð¾, `--enable-jfr`):
+   ```python
+   # evaluator.py:JFRProfiler
+   1. jcmd JFR.start       # Ð·Ð°Ð¿ÑÑÐº Ð·Ð°Ð¿Ð¸ÑÐ¸
+   2. Ð½Ð°Ð³ÑÑÐ·ÐºÐ° Ð½Ð° endpoint
+   3. jcmd JFR.stop         # Ð¾ÑÑÐ°Ð½Ð¾Ð²ÐºÐ°, ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð¸Ðµ .jfr
+   4. convert_jfr_if_needed # Ð¿Ð°ÑÑÐ¸Ð½Ð³ -> cpu_samples
+   ```
+5. **Score** ÐºÐ°Ð¶Ð´Ð¾Ð³Ð¾ Ð²Ð°ÑÐ¸Ð°Ð½ÑÐ°:
+   ```python
+   score = (1000 - avg_sql_count * 100) + (100 - avg_latency_ms) + (1000 - cpu_samples * 2)
+   ```
+6. ÐÐ¾Ð±ÐµÐ´Ð¸ÑÐµÐ»Ñ: Ð²Ð°ÑÐ¸Ð°Ð½Ñ Ñ Ð¼Ð°ÐºÑÐ¸Ð¼Ð°Ð»ÑÐ½ÑÐ¼ score (`max(results, key=lambda v: results[v]['score'])`)
+7. Rollback: ÐµÑÐ»Ð¸ Ð½Ð¸ Ð¾Ð´Ð¸Ð½ Ð²Ð°ÑÐ¸Ð°Ð½Ñ Ð½Ðµ Ð¿ÑÐ¾ÑÑÐ» ÑÐ±Ð¾ÑÐºÑ -- Ð²Ð¾ÑÑÑÐ°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð¸ÑÑÐ¾Ð´Ð½Ð¾Ð³Ð¾ ÐºÐ¾Ð´Ð°
+
+#### ÐÐµÑÑ scoring pipeline:
+
+```text
+                                 Scoring
+                              (Ð²ÑÐ±Ð¾Ñ Ð¿Ð¾Ð±ÐµÐ´Ð¸ÑÐµÐ»Ñ)
+                                    |
+         +--------------------------+--------------------------+
+         |                          |                          |
+         v                          v                          v
+  Iterative loop score      Multi-Variant JFR score     Pipeline score
+  (iterative_loop.py)       (evaluator.py)              (scorer.py)
+         |                          |                          |
+         v                          v                          v
+  100 - AST penalties        1000 - sql*100             0.6 * deltaLat
+                              + 100 - latency            + 0.3 * deltaRPS
+                             + 1000 - cpu*2             + 0.1 * deltaGC
+```
+
+**Scoring Ð²Ð½ÑÑÑÐ¸ Ð¸ÑÐµÑÐ°ÑÐ¸Ð²Ð½Ð¾Ð³Ð¾ ÑÐ¸ÐºÐ»Ð°** (`iterative_loop.py:score_candidate()`):
+
+```python
+def score_candidate(code, complexity_res):
+    score = 100.0
+    nesting = complexity_res["max_nesting_depth"]
+    if nesting > 1:
+        score -= 10.0 * (nesting - 1)   # -10 Ð·Ð° ÐºÐ°Ð¶Ð´ÑÐ¹ ÑÑÐ¾Ð²ÐµÐ½Ñ Ð²Ð»Ð¾Ð¶ÐµÐ½Ð½Ð¾ÑÑÐ¸ > 1
+    for issue in complexity_res["issues"]:
+        if sev == "high":   score -= 15.0
+        elif sev == "medium": score -= 5.0
+    if num_loops >= 3:       score -= 5.0
+    if suggestions:          score -= 3.0 * len(suggestions)
+    return max(score, 0.0)
+```
+
+ÐÑÐµÐ½ÐºÐ° Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð° Ð½Ð° AST-ÑÐ»Ð¾Ð¶Ð½Ð¾ÑÑÐ¸ (Ð³Ð»ÑÐ±Ð¸Ð½Ð° Ð²Ð»Ð¾Ð¶ÐµÐ½Ð½Ð¾ÑÑÐ¸, ÐºÐ¾Ð»Ð¸ÑÐµÑÑÐ²Ð¾ Ð¿ÑÐ¾Ð±Ð»ÐµÐ¼, ÐºÐ¾Ð»Ð¸ÑÐµÑÑÐ²Ð¾ ÑÐ¸ÐºÐ»Ð¾Ð²), Ð° Ð½Ðµ Ð½Ð° runtime-Ð¼ÐµÑÑÐ¸ÐºÐ°Ñ. Ð­ÑÐ¾ Ð´ÐµÑÑÐ²ÑÐ¹ ÑÐ¿Ð¾ÑÐ¾Ð± Ð¾ÑÑÐµÑÑ ÑÐ²Ð½Ð¾ Ð½ÐµÐºÐ°ÑÐµÑÑÐ²ÐµÐ½Ð½ÑÐµ Ð²Ð°ÑÐ¸Ð°Ð½ÑÑ Ð´Ð¾ Maven-Ð²ÐµÑÐ¸ÑÐ¸ÐºÐ°ÑÐ¸Ð¸.
+
+### Ð­ÑÐ°Ð¿ 7: Maven-Ð²ÐµÑÐ¸ÑÐ¸ÐºÐ°ÑÐ¸Ñ âï¸
+- `verify_compilation()` Ð·Ð°Ð¿ÑÑÐºÐ°ÐµÑ `mvn test-compile` Ð² Ð´Ð¸ÑÐµÐºÑÐ¾ÑÐ¸Ð¸ `java/`
+- ÐÑÐ»Ð¸ ÑÐ±Ð¾ÑÐºÐ° Ð½Ðµ ÑÐ´Ð°Ð»Ð°ÑÑ: +1 Ðº ÑÑÑÑÑÐ¸ÐºÑ consecutive_errors
+- ÐÐ¾ÑÐ»Ðµ **3 Ð¿Ð¾ÑÐ»ÐµÐ´Ð¾Ð²Ð°ÑÐµÐ»ÑÐ½ÑÑ Ð¾ÑÐ¸Ð±Ð¾Ðº** -- `rolled_back_to_original` (Ð²Ð¾ÑÑÑÐ°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð¸ÑÑÐ¾Ð´Ð½Ð¾Ð³Ð¾ ÐºÐ¾Ð´Ð°, Ð·Ð°Ð²ÐµÑÑÐµÐ½Ð¸Ðµ ÑÐ¸ÐºÐ»Ð°)
+- Ð£ÑÐ¿ÐµÑÐ½Ð°Ñ ÑÐ±Ð¾ÑÐºÐ°: Ð¾Ð±Ð½ÑÐ»ÐµÐ½Ð¸Ðµ ÑÑÑÑÑÐ¸ÐºÐ°, ÑÐ¸ÐºÑÐ°ÑÐ¸Ñ ÑÐµÐºÑÑÐµÐ³Ð¾ Ð²Ð°ÑÐ¸Ð°Ð½ÑÐ° Ð² `current_code`
+- **LLM Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐµÑÑÑ** -- ÑÑÐ°Ð½Ð´Ð°ÑÑÐ½ÑÐ¹ Ð²ÑÐ·Ð¾Ð² Maven CLI
+
+### Ð­ÑÐ°Ð¿ 8: ÐÑÐµÐ½ÐºÐ° Ð¸ Ð²ÑÐ±Ð¾Ñ Ð¿Ð¾Ð±ÐµÐ´Ð¸ÑÐµÐ»Ñ âï¸
+
+ÐÑÐ¸Ð¼ÐµÐ½ÑÐµÑÑÑ Ð½Ð° ÑÑÑÑ ÑÑÐ¾Ð²Ð½ÑÑ:
+
+| Ð£ÑÐ¾Ð²ÐµÐ½Ñ | ÐÐ¾Ð´ÑÐ»Ñ | Ð§ÑÐ¾ Ð¾ÑÐµÐ½Ð¸Ð²Ð°ÐµÑ | ÐÐµÑÐ¾Ð´ |
+|---------|--------|---------------|-------|
+| **Iterative loop** (Ð²Ð½ÑÑÑÐµÐ½Ð½Ð¸Ð¹) | `iterative_loop.py` | ÐÐ°ÑÐµÑÑÐ²Ð¾ ÐºÐ¾Ð´Ð° Ð¿Ð¾ÑÐ»Ðµ ÐºÐ°Ð¶Ð´Ð¾Ð¹ Ð¸ÑÐµÑÐ°ÑÐ¸Ð¸ | AST-complexity score (0..100) |
+| **Multi-Variant JFR** (Ð¿Ð°ÑÐ°Ð»Ð»ÐµÐ»ÑÐ½ÑÐ¹) | `evaluator.py` | ÐÑÐ¾Ð¸Ð·Ð²Ð¾Ð´Ð¸ÑÐµÐ»ÑÐ½Ð¾ÑÑÑ 3+ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°ÑÐ¾Ð² | SQL count + Latency + CPU samples |
+| **Pipeline** (ÑÐ¸Ð½Ð°Ð»ÑÐ½ÑÐ¹) | `scorer.py` | ÐÐ±ÑÐ¸Ð¹ Ð¿ÑÐ¸ÑÐ¾ÑÑ Ð¿Ð¾ÑÐ»Ðµ Ð²ÑÐµÑ Ð¸ÑÐ¿ÑÐ°Ð²Ð»ÐµÐ½Ð¸Ð¹ | `0.6*dLat + 0.3*dRPS + 0.1*dGC` |
+
+**Pipeline Score** (`pipeline/scorer.py:Scorer.evaluate()`):
+```python
+Score = 0.6 * deltaLatency_p95 + 0.3 * deltaRPS + 0.1 * deltaGC
+```
+- **deltaLatency_p95**: Ð¾ÑÐ½Ð¾ÑÐ¸ÑÐµÐ»ÑÐ½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ 95-Ð³Ð¾ Ð¿ÐµÑÑÐµÐ½ÑÐ¸Ð»Ñ Ð·Ð°Ð´ÐµÑÐ¶ÐºÐ¸ (Ð½Ð¾ÑÐ¼Ð°Ð»Ð¸Ð·Ð¾Ð²Ð°Ð½Ð¾ 0..1)
+- **deltaRPS**: Ð¾ÑÐ½Ð¾ÑÐ¸ÑÐµÐ»ÑÐ½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ Ð·Ð°Ð¿ÑÐ¾ÑÐ¾Ð² Ð² ÑÐµÐºÑÐ½Ð´Ñ
+- **deltaGC**: Ð¾ÑÐ½Ð¾ÑÐ¸ÑÐµÐ»ÑÐ½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ GC allocations (Ð¸Ð· Ð¿ÑÐ¾ÑÐ°Ð¹Ð»ÐµÑÐ°)
+
+ÐÐµÑÐ° ÐºÐ¾Ð½ÑÐ¸Ð³ÑÑÐ¸ÑÑÑÑÑÑ Ð² `core/config.py`: `WEIGHT_LATENCY_P95`, `WEIGHT_RPS`, `WEIGHT_GC_ALLOC`.
+
+ÐÑÐ¾Ð³Ð¾Ð²ÑÐ¹ Ð²ÑÐ±Ð¾Ñ: Winning variant Ð¿ÑÐ¸Ð¼ÐµÐ½ÑÐµÑÑÑ Ðº ÑÐ°Ð¹Ð»Ñ. ÐÑÐ»Ð¸ Ð²ÑÐµ Ð²Ð°ÑÐ¸Ð°Ð½ÑÑ Ð½Ðµ Ð¿ÑÐ¾ÑÐ»Ð¸ -- ÑÐ°Ð¹Ð» Ð²Ð¾Ð·Ð²ÑÐ°ÑÐ°ÐµÑÑÑ Ðº Ð¸ÑÑÐ¾Ð´Ð½Ð¾Ð¼Ñ ÑÐ¾ÑÑÐ¾ÑÐ½Ð¸Ñ.
 ### Итог: где LLM, а где нет
 
 | Этап | Название | LLM? | Механизм |
