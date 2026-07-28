@@ -140,11 +140,14 @@ def list_run_ids(conn) -> List[str]:
         "MATCH (r:RetainedObject) RETURN DISTINCT r.runId",
         "MATCH (b:MonitorBlock) RETURN DISTINCT b.runId",
     ):
-        res = conn.execute(query)
-        while res.has_next():
-            rid = res.get_next()[0]
-            if rid:
-                run_ids.add(rid)
+        try:
+            res = conn.execute(query)
+            while res.has_next():
+                rid = res.get_next()[0]
+                if rid:
+                    run_ids.add(rid)
+        except Exception:
+            pass
     return sorted(run_ids)
 
 

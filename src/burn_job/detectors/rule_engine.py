@@ -33,9 +33,9 @@ RULE_FIELD_MAP = {
 }
 
 
-def _build_condition_clauses(match_block: dict, node_alias: str = "a") -> Tuple[List[str], List[str]]:
+def _build_condition_clauses(match_block: dict, node_alias: str = "a", param_offset: int = 0) -> Tuple[List[str], Dict[str, Any]]:
     clauses = []
-    params = []
+    params = {}
     if not match_block:
         return clauses, params
 
@@ -43,9 +43,12 @@ def _build_condition_clauses(match_block: dict, node_alias: str = "a") -> Tuple[
         if field == "any":
             or_groups = []
             for group in values:
-                inner_clauses, inner_params = _build_condition_clauses(group, node_alias)
-                or_groups.append("(" + " AND ".join(inner_clauses) + ")")
-                params.extend(inner_params)
+                inner_clauses, inner_params = _build_condition_clauses(
+                    group, node_alias, param_offset=param_offset + len(params)
+                )
+                if inner_clauses:
+                    or_groups.append("(" + " AND ".join(inner_clauses) + ")")
+                params.update(inner_params)
             if or_groups:
                 clauses.append("(" + " OR ".join(or_groups) + ")")
             continue
@@ -56,21 +59,21 @@ def _build_condition_clauses(match_block: dict, node_alias: str = "a") -> Tuple[
         if not isinstance(values, list):
             values = [values]
         for val in values:
-            param_name = f"p{len(params)}"
+            param_name = f"p{param_offset + len(params)}"
             if op == "CONTAINS":
                 clauses.append(f"{prefix}.{col} CONTAINS ${param_name}")
             elif op == "STARTS WITH":
                 clauses.append(f"{prefix}.{col} STARTS WITH ${param_name}")
             elif op == "=":
                 clauses.append(f"{prefix}.{col} = ${param_name}")
-            params.append(val)
+            params[param_name] = val
 
     return clauses, params
 
 
 def _execute_edge_rule(conn, rule: dict) -> List[dict]:
-    match_clauses, match_params = _build_condition_clauses(rule.get("match"), "a")
-    exclude_clauses, exclude_params = _build_condition_clauses(rule.get("exclude"), "a")
+    match_clauses, match_params = _build_condition_clauses(rule.get("match"), "a", param_offset=0)
+    exclude_clauses, exclude_params = _build_condition_clauses(rule.get("exclude"), "a", param_offset=len(match_params))
     threshold = rule.get("threshold", {})
     order_by = rule.get("order_by", {})
     limit = rule.get("limit")
