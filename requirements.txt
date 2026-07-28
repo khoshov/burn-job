@@ -2,6 +2,8 @@
 kuzu
 jinja2
 llama-cpp-python
+typer>=0.9.0
+rich>=13.0.0
 # vllm  # Optional alternative high-throughput local backend (pip install vllm)
 
 # Testing dependencies

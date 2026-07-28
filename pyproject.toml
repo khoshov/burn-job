@@ -12,6 +12,8 @@ dependencies = [
     "kuzu",
     "jinja2",
     "llama-cpp-python",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +23,9 @@ test = [
 
 [project.scripts]
 burn-job = "burn_job.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
