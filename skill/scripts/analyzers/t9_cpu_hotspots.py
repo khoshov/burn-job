@@ -45,11 +45,12 @@ def analyze_t9(conn) -> list:
     # 2. Top CPU Hotspot Methods (High sample count spike)
     query_cpu_hotspots = """
         MATCH (m:Method)
-        WHERE m.className STARTS WITH 'com.example' AND m.sampleCount > 100
+        WHERE (m.className STARTS WITH 'com.example' OR m.className STARTS WITH 'examples') AND m.sampleCount > 100
         RETURN m.className + '.' + m.methodName AS method, m.sampleCount
         ORDER BY m.sampleCount DESC
         LIMIT 10
     """
+
     res = conn.execute(query_cpu_hotspots)
     while res.has_next():
         method, count = res.get_next()

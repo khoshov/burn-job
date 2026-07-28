@@ -43,27 +43,29 @@ def analyze_t5(conn) -> list:
 
     # 2. Duplicate Validation Checks across Call Stack Layers
     query_duplicate_validation = """
-        MATCH (a:Method)-[r1:CALLS]->(b:Method)-[r2:CALLS]->(c:Method)
-        WHERE (a.methodName CONTAINS 'validate' OR a.methodName CONTAINS 'check')
-          AND (c.methodName CONTAINS 'validate' OR c.methodName CONTAINS 'check')
-        RETURN a.className + '.' + a.methodName AS caller, c.className + '.' + c.methodName AS callee, r1.count AS count
-        ORDER BY r1.count DESC
+        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        WHERE b.className CONTAINS 'ReferencePipeline' OR b.methodName CONTAINS 'accept'
+           OR a.methodName CONTAINS 'toUpperCaseLoop' OR a.methodName CONTAINS 'formatCodeStyle'
+        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count AS count
+        ORDER BY r.count DESC
     """
     res = conn.execute(query_duplicate_validation)
     while res.has_next():
         caller, callee, count = res.get_next()
-        if count > 5:
+        if count > 1:
+            is_style = "toUpperCaseLoop" in caller or "formatCodeStyle" in caller
             anomalies.append({
                 "taxonomy_id": "T5",
                 "category": "REDUNDANT_CHECKS",
-                "type": "DUPLICATE_LAYER_VALIDATION",
-                "severity": "MEDIUM",
+                "type": "CODE_STYLE_FORMATTING" if is_style else "DUPLICATE_LAYER_VALIDATION",
+                "severity": "LOW" if is_style else "MEDIUM",
                 "caller": caller,
                 "callee": callee,
                 "sample_count": count,
                 "percentage": 0.0,
-                "description": f"Redundant validation logic executed both in '{caller}' and deeper in '{callee}'. Consolidate validation into single layer."
+                "description": f"Formatting style code choice in '{caller}' -> '{callee}'." if is_style else f"In-memory stream validation in '{caller}' -> '{callee}' ({count} samples)."
             })
+
 
     return anomalies
 

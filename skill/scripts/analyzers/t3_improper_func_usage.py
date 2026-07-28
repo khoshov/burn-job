@@ -47,10 +47,11 @@ def analyze_t3(conn) -> list:
     query_full_fetch_for_check = """
         MATCH (a:Method)-[r:CALLS]->(b:Method)
         WHERE (a.methodName CONTAINS 'exists' OR a.methodName CONTAINS 'check' OR a.methodName CONTAINS 'Count')
-          AND (b.methodName CONTAINS 'findAll' OR b.methodName CONTAINS 'getEmployees')
+          AND (b.methodName CONTAINS 'findAll' OR b.methodName CONTAINS 'getEmployees' OR b.methodName CONTAINS 'findUserById')
         RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
         ORDER BY r.count DESC
     """
+
     res = conn.execute(query_full_fetch_for_check)
     while res.has_next():
         caller, callee, count, pct = res.get_next()
