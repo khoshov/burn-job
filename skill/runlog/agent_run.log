@@ -26,3 +26,734 @@
 [2026-07-28T16:58:53.634727] [INFO] [DRY RUN] Would write updated content to src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Length: 1710 chars).
 [2026-07-28T16:58:53.634755] [INFO] Refactoring complete. 4/4 files modified.
 [2026-07-28T16:58:53.634802] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===
+[2026-07-28T18:06:27.473578] [INFO] === STARTING LLM CODE REFACTORING & JFR EVALUATION AGENT ===
+[2026-07-28T18:06:27.474203] [INFO] Loaded 4 findings from report.
+[2026-07-28T18:06:27.474275] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/NPlusOneService.java (Lines 27-38)
+[2026-07-28T18:06:27.474307] [INFO] Taxonomy: ['T6', 'T2'] | Mechanism: Инициализация ленивой коллекции d.getEmployees().size() в цикле по каждому отделу
+[2026-07-28T18:06:27.474436] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:06:27.474524] [INFO] [DRY RUN] Generated 3 candidate variants for src/main/java/com/example/badhibernate/service/NPlusOneService.java.
+[2026-07-28T18:06:27.474561] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (Lines 29-45)
+[2026-07-28T18:06:27.474590] [INFO] Taxonomy: ['T8', 'T3'] | Mechanism: Загрузка всех записей таблицы через orderRepository.findAll() в кучу JVM с последующей фильтрацией и пагинацией через Stream API
+[2026-07-28T18:06:27.474715] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:06:27.474835] [INFO] [DRY RUN] Generated 2 candidate variants for src/main/java/com/example/badhibernate/service/InMemoryFilterService.java.
+[2026-07-28T18:06:27.474883] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/SaveInLoopService.java (Lines 27-43)
+[2026-07-28T18:06:27.474915] [INFO] Taxonomy: ['T6', 'T1'] | Mechanism: Поштучный вызов employeeRepository.save(emp) в цикле без JDBC Batching
+[2026-07-28T18:06:27.475039] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:06:27.475119] [INFO] [DRY RUN] Generated 1 candidate variants for src/main/java/com/example/badhibernate/service/SaveInLoopService.java.
+[2026-07-28T18:06:27.475155] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Lines 26-32)
+[2026-07-28T18:06:27.475189] [INFO] Taxonomy: ['T3', 'T4'] | Mechanism: Загрузка полных управляемых сущностей Employee со всеми полями и тяжелыми LOB-колонками (detailedBiography) ради простых DTO
+[2026-07-28T18:06:27.475331] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:06:27.475456] [INFO] [DRY RUN] Generated 1 candidate variants for src/main/java/com/example/badhibernate/service/FullEntityFetchService.java.
+[2026-07-28T18:06:27.475505] [INFO] Refactoring complete. 4/4 files modified.
+[2026-07-28T18:06:27.475532] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===
+[2026-07-28T18:08:21.107186] [INFO] === STARTING LLM CODE REFACTORING & JFR EVALUATION AGENT ===
+[2026-07-28T18:08:21.108160] [INFO] Loaded 4 findings from report.
+[2026-07-28T18:08:21.108357] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/NPlusOneService.java (Lines 27-38)
+[2026-07-28T18:08:21.108391] [INFO] Taxonomy: ['T6', 'T2'] | Mechanism: Инициализация ленивой коллекции d.getEmployees().size() в цикле по каждому отделу
+[2026-07-28T18:08:21.108520] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:08:21.108592] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:08:27.720690] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:08:27.721693] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/NPlusOneService.java...
+[2026-07-28T18:08:27.750544] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:29.484447] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[6,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.616 s
+[INFO] Finished at: 2026-07-28T18:08:29+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[6,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:08:29.484859] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:30.659180] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[7,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.468 s
+[INFO] Finished at: 2026-07-28T18:08:30+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[7,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:08:30.659540] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:32.252171] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[7,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.871 s
+[INFO] Finished at: 2026-07-28T18:08:32+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[7,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:08:32.252562] [WARNING] No candidate variant passed build/verification. Rolling back to original.
+[2026-07-28T18:08:32.252840] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (Lines 29-45)
+[2026-07-28T18:08:32.252934] [INFO] Taxonomy: ['T8', 'T3'] | Mechanism: Загрузка всех записей таблицы через orderRepository.findAll() в кучу JVM с последующей фильтрацией и пагинацией через Stream API
+[2026-07-28T18:08:32.253077] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:08:32.253130] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:08:37.005343] [INFO] === STARTING LLM CODE REFACTORING & JFR EVALUATION AGENT ===
+[2026-07-28T18:08:37.005692] [INFO] Loaded 4 findings from report.
+[2026-07-28T18:08:37.005781] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/NPlusOneService.java (Lines 27-38)
+[2026-07-28T18:08:37.005820] [INFO] Taxonomy: ['T6', 'T2'] | Mechanism: Инициализация ленивой коллекции d.getEmployees().size() в цикле по каждому отделу
+[2026-07-28T18:08:37.005871] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:08:37.005903] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:08:47.030685] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:08:47.031191] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/InMemoryFilterService.java...
+[2026-07-28T18:08:47.043260] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:48.880010] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:08:48.880378] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:50.530878] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:08:50.531291] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:52.037773] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:08:52.038019] [SUCCESS] 🏆 Winning Variant Selected: [v1] with optimal performance score: 1.00
+[2026-07-28T18:08:52.038121] [SUCCESS] Applied winning variant [v1] to src/main/java/com/example/badhibernate/service/InMemoryFilterService.java.
+[2026-07-28T18:08:52.038194] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/SaveInLoopService.java (Lines 27-43)
+[2026-07-28T18:08:52.038225] [INFO] Taxonomy: ['T6', 'T1'] | Mechanism: Поштучный вызов employeeRepository.save(emp) в цикле без JDBC Batching
+[2026-07-28T18:08:52.038299] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:08:52.038332] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:08:54.139688] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:08:54.140217] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/NPlusOneService.java...
+[2026-07-28T18:08:54.155342] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:55.728719] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:08:55.729302] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:57.134503] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[84,65] cannot find symbol
+  symbol:   method countEmployeesByDepartmentIds(java.util.List<java.lang.Long>)
+  location: variable departmentRepository of type com.example.badhibernate.repository.DepartmentRepository
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.682 s
+[INFO] Finished at: 2026-07-28T18:08:57+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[84,65] cannot find symbol
+[ERROR]   symbol:   method countEmployeesByDepartmentIds(java.util.List<java.lang.Long>)
+[ERROR]   location: variable departmentRepository of type com.example.badhibernate.repository.DepartmentRepository
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:08:57.134868] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:08:58.475588] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[78,36] cannot find symbol
+  symbol:   method findDepartmentDtosWithCount()
+  location: variable departmentRepository of type com.example.badhibernate.repository.DepartmentRepository
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.656 s
+[INFO] Finished at: 2026-07-28T18:08:58+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java:[78,36] cannot find symbol
+[ERROR]   symbol:   method findDepartmentDtosWithCount()
+[ERROR]   location: variable departmentRepository of type com.example.badhibernate.repository.DepartmentRepository
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:08:58.475917] [SUCCESS] 🏆 Winning Variant Selected: [v1] with optimal performance score: 1.00
+[2026-07-28T18:08:58.476036] [SUCCESS] Applied winning variant [v1] to src/main/java/com/example/badhibernate/service/NPlusOneService.java.
+[2026-07-28T18:08:58.476133] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (Lines 29-45)
+[2026-07-28T18:08:58.476172] [INFO] Taxonomy: ['T8', 'T3'] | Mechanism: Загрузка всех записей таблицы через orderRepository.findAll() в кучу JVM с последующей фильтрацией и пагинацией через Stream API
+[2026-07-28T18:08:58.476245] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:08:58.476280] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:08:59.466548] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:08:59.466897] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/SaveInLoopService.java...
+[2026-07-28T18:08:59.476352] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:00.659281] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.463 s
+[INFO] Finished at: 2026-07-28T18:09:00+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:00.659766] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:01.802691] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.452 s
+[INFO] Finished at: 2026-07-28T18:09:01+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:01.803171] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:02.970581] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+  (use -source 25 or higher to enable implicitly declared classes)
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.467 s
+[INFO] Finished at: 2026-07-28T18:09:02+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java:[8,8] implicitly declared classes are not supported in -source 21
+[ERROR]   (use -source 25 or higher to enable implicitly declared classes)
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:02.971039] [WARNING] No candidate variant passed build/verification. Rolling back to original.
+[2026-07-28T18:09:02.971276] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Lines 26-32)
+[2026-07-28T18:09:02.971312] [INFO] Taxonomy: ['T3', 'T4'] | Mechanism: Загрузка полных управляемых сущностей Employee со всеми полями и тяжелыми LOB-колонками (detailedBiography) ради простых DTO
+[2026-07-28T18:09:02.971379] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:09:02.971409] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:09:15.678981] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:09:15.679565] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/InMemoryFilterService.java...
+[2026-07-28T18:09:15.700266] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:17.377885] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] Some messages have been simplified; recompile with -Xdiags:verbose to get full output
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] no suitable method found for findAll((root,quer[...]se()),org.springframework.data.domain.PageRequest)
+    method org.springframework.data.repository.query.QueryByExampleExecutor.<S>findAll(org.springframework.data.domain.Example<S>,org.springframework.data.domain.Pageable) is not applicable
+      (cannot infer type-variable(s) S
+        (argument mismatch; org.springframework.data.domain.Example is not a functional interface
+          multiple non-overriding abstract methods found in interface org.springframework.data.domain.Example))
+    method org.springframework.data.jpa.repository.JpaRepository.<S>findAll(org.springframework.data.domain.Example<S>) is not applicable
+      (cannot infer type-variable(s) S
+        (actual and formal argument lists differ in length))
+    method org.springframework.data.jpa.repository.JpaRepository.<S>findAll(org.springframework.data.domain.Example<S>,org.springframework.data.domain.Sort) is not applicable
+      (cannot infer type-variable(s) S
+        (argument mismatch; org.springframework.data.domain.PageRequest cannot be converted to org.springframework.data.domain.Sort))
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.819 s
+[INFO] Finished at: 2026-07-28T18:09:17+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] no suitable method found for findAll((root,quer[...]se()),org.springframework.data.domain.PageRequest)
+[ERROR]     method org.springframework.data.repository.query.QueryByExampleExecutor.<S>findAll(org.springframework.data.domain.Example<S>,org.springframework.data.domain.Pageable) is not applicable
+[ERROR]       (cannot infer type-variable(s) S
+[ERROR]         (argument mismatch; org.springframework.data.domain.Example is not a functional interface
+[ERROR]           multiple non-overriding abstract methods found in interface org.springframework.data.domain.Example))
+[ERROR]     method org.springframework.data.jpa.repository.JpaRepository.<S>findAll(org.springframework.data.domain.Example<S>) is not applicable
+[ERROR]       (cannot infer type-variable(s) S
+[ERROR]         (actual and formal argument lists differ in length))
+[ERROR]     method org.springframework.data.jpa.repository.JpaRepository.<S>findAll(org.springframework.data.domain.Example<S>,org.springframework.data.domain.Sort) is not applicable
+[ERROR]       (cannot infer type-variable(s) S
+[ERROR]         (argument mismatch; org.springframework.data.domain.PageRequest cannot be converted to org.springframework.data.domain.Sort))
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:17.378285] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:18.727206] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] cannot find symbol
+  symbol:   method findByStatusNative(java.lang.String,org.springframework.data.domain.PageRequest)
+  location: variable orderRepository of type com.example.badhibernate.repository.OrderRepository
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.664 s
+[INFO] Finished at: 2026-07-28T18:09:18+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] cannot find symbol
+[ERROR]   symbol:   method findByStatusNative(java.lang.String,org.springframework.data.domain.PageRequest)
+[ERROR]   location: variable orderRepository of type com.example.badhibernate.repository.OrderRepository
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:18.727666] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:20.138334] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] cannot find symbol
+  symbol:   method findByStatusJPQL(java.lang.String,org.springframework.data.domain.PageRequest)
+  location: variable orderRepository of type com.example.badhibernate.repository.OrderRepository
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.733 s
+[INFO] Finished at: 2026-07-28T18:09:20+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java:[91,31] cannot find symbol
+[ERROR]   symbol:   method findByStatusJPQL(java.lang.String,org.springframework.data.domain.PageRequest)
+[ERROR]   location: variable orderRepository of type com.example.badhibernate.repository.OrderRepository
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:20.138737] [WARNING] No candidate variant passed build/verification. Rolling back to original.
+[2026-07-28T18:09:20.139062] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/SaveInLoopService.java (Lines 27-43)
+[2026-07-28T18:09:20.139122] [INFO] Taxonomy: ['T6', 'T1'] | Mechanism: Поштучный вызов employeeRepository.save(emp) в цикле без JDBC Batching
+[2026-07-28T18:09:20.139204] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:09:20.139252] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:09:22.639781] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:09:22.640720] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/FullEntityFetchService.java...
+[2026-07-28T18:09:22.660470] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:24.056171] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[57,34] cannot find symbol
+  symbol:   method findSimpleDtosNative()
+  location: variable employeeRepository of type com.example.badhibernate.repository.EmployeeRepository
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.695 s
+[INFO] Finished at: 2026-07-28T18:09:24+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[57,34] cannot find symbol
+[ERROR]   symbol:   method findSimpleDtosNative()
+[ERROR]   location: variable employeeRepository of type com.example.badhibernate.repository.EmployeeRepository
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:24.056894] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:25.597329] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ bad-hibernate-demo ---
+[INFO] skip non existing resourceDirectory /Users/stanislavkhoshov/Documents/burn-job/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 3 source files with javac [debug parameters release 21] to target/test-classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/test/java/com/example/badhibernate/TaxonomyTestCasesTest.java:[125,72] cannot find symbol
+  symbol:   method getEmployeesVariant1_InterfaceProjection()
+  location: variable fullEntityFetchService of type com.example.badhibernate.service.FullEntityFetchService
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.845 s
+[INFO] Finished at: 2026-07-28T18:09:25+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:testCompile (default-testCompile) on project bad-hibernate-demo: Compilation failure
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/test/java/com/example/badhibernate/TaxonomyTestCasesTest.java:[125,72] cannot find symbol
+[ERROR]   symbol:   method getEmployeesVariant1_InterfaceProjection()
+[ERROR]   location: variable fullEntityFetchService of type com.example.badhibernate.service.FullEntityFetchService
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:25.597902] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:27.000666] [ERROR] Maven test-compile FAILED:
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.example:bad-hibernate-demo >-------------------
+[INFO] Building bad-hibernate-demo 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ bad-hibernate-demo ---
+[INFO] Copying 2 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ bad-hibernate-demo ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 21 source files with javac [debug parameters release 21] to target/classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[62,49] cannot find symbol
+  symbol:   method getId()
+  location: class com.example.badhibernate.dto.EmployeeSimpleDto
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[79,63] cannot find symbol
+  symbol:   method findSimpleDtosByPage(org.springframework.data.domain.PageRequest)
+  location: variable employeeRepository of type com.example.badhibernate.repository.EmployeeRepository
+[INFO] 2 errors 
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.706 s
+[INFO] Finished at: 2026-07-28T18:09:26+03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project bad-hibernate-demo: Compilation failure: Compilation failure: 
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[62,49] cannot find symbol
+[ERROR]   symbol:   method getId()
+[ERROR]   location: class com.example.badhibernate.dto.EmployeeSimpleDto
+[ERROR] /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java:[79,63] cannot find symbol
+[ERROR]   symbol:   method findSimpleDtosByPage(org.springframework.data.domain.PageRequest)
+[ERROR]   location: variable employeeRepository of type com.example.badhibernate.repository.EmployeeRepository
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+[2026-07-28T18:09:27.000985] [WARNING] No candidate variant passed build/verification. Rolling back to original.
+[2026-07-28T18:09:27.001136] [INFO] Refactoring complete. 1/4 files modified.
+[2026-07-28T18:09:27.001183] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:28.519698] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:09:28.520084] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===
+[2026-07-28T18:09:42.133085] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:09:42.133662] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/SaveInLoopService.java...
+[2026-07-28T18:09:42.143578] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:43.942658] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:09:43.943195] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:45.479186] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:09:45.479722] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:09:47.026448] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:09:47.026830] [SUCCESS] 🏆 Winning Variant Selected: [v1] with optimal performance score: 1.00
+[2026-07-28T18:09:47.027012] [SUCCESS] Applied winning variant [v1] to src/main/java/com/example/badhibernate/service/SaveInLoopService.java.
+[2026-07-28T18:09:47.027095] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Lines 26-32)
+[2026-07-28T18:09:47.027133] [INFO] Taxonomy: ['T3', 'T4'] | Mechanism: Загрузка полных управляемых сущностей Employee со всеми полями и тяжелыми LOB-колонками (detailedBiography) ради простых DTO
+[2026-07-28T18:09:47.027216] [INFO] Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.
+[2026-07-28T18:09:47.027250] [INFO] Requesting multi-variant options from LLM (deepseek-chat)...
+[2026-07-28T18:09:58.491333] [INFO] Extracted 3 candidate variant(s) from LLM.
+[2026-07-28T18:09:58.492242] [INFO] Evaluating 3 candidate variants for src/main/java/com/example/badhibernate/service/FullEntityFetchService.java...
+[2026-07-28T18:09:58.511587] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:10:00.086282] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:10:00.086982] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:10:01.593727] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:10:01.594178] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:10:03.170323] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:10:03.170732] [SUCCESS] 🏆 Winning Variant Selected: [v1] with optimal performance score: 1.00
+[2026-07-28T18:10:03.170861] [SUCCESS] Applied winning variant [v1] to src/main/java/com/example/badhibernate/service/FullEntityFetchService.java.
+[2026-07-28T18:10:03.170916] [INFO] Refactoring complete. 3/4 files modified.
+[2026-07-28T18:10:03.170952] [INFO] Executing Maven verification (mvn test-compile)...
+[2026-07-28T18:10:04.731006] [SUCCESS] Maven test-compile PASSED cleanly.
+[2026-07-28T18:10:04.731365] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===

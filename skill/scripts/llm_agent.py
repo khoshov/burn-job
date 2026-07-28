@@ -2,7 +2,8 @@
 """
 LLM-Based Code Refactoring Agent for Java / Spring Boot Performance Antipatterns.
 Parses findings reports (findings.json / KùzuDB graph anomalies), constructs LLM prompts,
-applies fixes, verifies compilation/tests via Maven, and logs all steps to runlog/.
+generates single or multi-variant refactoring candidates (T1–T9), verifies compilation/tests via Maven,
+evaluates JFR profiling samples & benchmark metrics, and logs all steps to runlog/agent_run.log.
 """
 
 import os
@@ -14,6 +15,16 @@ import urllib.request
 import urllib.error
 import re
 from datetime import datetime
+from typing import Dict, List, Any, Tuple, Optional
+
+# Add skill/scripts to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from multi_variant_jfr_evaluator import evaluate_variant_candidates, JFRProfiler
+    HAS_MULTI_JFR_EVAL = True
+except ImportError:
+    HAS_MULTI_JFR_EVAL = False
 
 DEFAULT_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runlog", "agent_run.log")
 
@@ -39,6 +50,25 @@ RULES:
 {NON_DEFECT_RULES}
 """
 
+SYSTEM_MULTI_VARIANT_PROMPT = SYSTEM_PROMPT + """
+MULTI-VARIANT INSTRUCTIONS:
+Please generate EXACTLY 3 DISTINCT complete refactored Java file candidate implementations for the bottleneck, labeled clearly as:
+[VARIANT_1]
+```java
+// Complete Java file 1 with package, imports, and public class ...
+```
+[VARIANT_2]
+```java
+// Complete Java file 2 with package, imports, and public class ...
+```
+[VARIANT_3]
+```java
+// Complete Java file 3 with package, imports, and public class ...
+```
+CRITICAL RULE:
+Each variant MUST be a COMPLETE, compilable Java source file containing the package declaration, all imports, and the full public class definition. Do NOT output partial methods or unwrapped code snippets!
+"""
+
 class LLMAgentLogger:
     def __init__(self, log_path=DEFAULT_LOG_PATH):
         self.log_path = log_path
@@ -56,7 +86,6 @@ class LLMAgent:
         self.logger = logger or LLMAgentLogger()
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
         
-        # DeepSeek auto-configuration if token or base URL indicates DeepSeek
         default_base_url = "https://api.deepseek.com/v1" if (self.api_key and "deepseek" in (base_url or "").lower()) or os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
         self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
         
@@ -81,12 +110,12 @@ class LLMAgent:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.1
+            "temperature": 0.2
         }
 
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=90) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 return result["choices"][0]["message"]["content"]
         except urllib.error.HTTPError as e:
@@ -97,77 +126,6 @@ class LLMAgent:
             self.logger.log("ERROR", f"LLM API Exception: {str(e)}")
             raise
 
-    def fallback_refactor(self, finding: dict, file_content: str) -> str:
-        """
-        Deterministic pattern-matching refactoring engine used in offline mode or judge sandbox environments.
-        Refactors known sub-optimal Java service methods according to taxonomy guidelines.
-        """
-        file_path = finding.get("file", "")
-        family = finding.get("family", "")
-        pdf_tax = finding.get("pdf_taxonomy", [])
-        mechanism = finding.get("mechanism", "").lower()
-
-        self.logger.log("INFO", f"Applying fallback offline pattern refactoring for {file_path}")
-
-        updated_content = file_content
-
-        # 1. N+1 Queries (NPlusOneService.java)
-        if "nplusoneservice" in file_path.lower() or "t6" in pdf_tax or "n+1" in mechanism:
-            updated_content = re.sub(
-                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
-                'List<Department> departments = departmentRepository.findAllWithEmployeesOptimal();',
-                updated_content
-            )
-
-        # 2. In-Memory Filter & Pagination (InMemoryFilterService.java)
-        if "inmemoryfilterservice" in file_path.lower() or "t8" in pdf_tax or "in-memory" in mechanism:
-            updated_content = re.sub(
-                r'public\s+List<OrderSummaryDto>\s+getOrdersByStatusSubOptimal\([^)]*\)\s*\{[^}]*\}',
-                '''public List<OrderSummaryDto> getOrdersByStatusSubOptimal(String status, int page, int size) {
-        // OPTIMIZED by LLM Agent: Push WHERE filtering and pagination to Database via PageRequest
-        return orderRepository.findByStatusOptimal(status, org.springframework.data.domain.PageRequest.of(page, size))
-                .getContent();
-    }''',
-                updated_content,
-                flags=re.DOTALL
-            )
-
-        # 3. Save in Loop / Lack of Batching (SaveInLoopService.java)
-        if "saveinloopservice" in file_path.lower() or ("t6" in pdf_tax and "save" in mechanism) or "batching" in mechanism:
-            updated_content = re.sub(
-                r'for\s*\([^)]*\)\s*\{[^}]*employeeRepository\.save\(emp\);[^}]*\}',
-                '''List<Employee> employeesToSave = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            employeesToSave.add(new Employee(
-                    "SubOptFirst" + i,
-                    "SubOptLast" + i,
-                    "subopt" + i + "@example.com",
-                    BigDecimal.valueOf(50000 + i),
-                    "Heavy biography text content for testing payload size " + i,
-                    null
-            ));
-        }
-        employeeRepository.saveAll(employeesToSave);''',
-                updated_content,
-                flags=re.DOTALL
-            )
-
-        # 4. Full Entity Fetch vs Projection (FullEntityFetchService.java)
-        if "fullentityfetchservice" in file_path.lower() or "t3" in pdf_tax or "projection" in mechanism:
-            updated_content = re.sub(
-                r'public\s+List<EmployeeSimpleDto>\s+getEmployeesSubOptimal\(\)\s*\{[^}]*\}',
-                '''public List<EmployeeSimpleDto> getEmployeesSubOptimal() {
-        // OPTIMIZED by LLM Agent: Interface projection avoids fetching heavy LOB columns and First-Level Cache bloat
-        return employeeRepository.findAllProjectedBy().stream()
-                .map(p -> new EmployeeSimpleDto(p.getId(), p.getFirstName(), p.getLastName(), p.getEmail()))
-                .toList();
-    }''',
-                updated_content,
-                flags=re.DOTALL
-            )
-
-        return updated_content
-
     def extract_code_block(self, llm_response: str) -> str:
         match = re.search(r"```java\s*\n(.*?)\n```", llm_response, re.DOTALL)
         if match:
@@ -177,7 +135,108 @@ class LLMAgent:
             return match_generic.group(1)
         return llm_response.strip()
 
-    def process_finding(self, finding: dict, root_dir: str, dry_run: bool = False, force_offline: bool = False) -> bool:
+    def extract_multi_code_blocks(self, llm_response: str) -> Dict[str, str]:
+        """Extracts multiple candidate variants [VARIANT_1], [VARIANT_2], [VARIANT_3]."""
+        candidates = {}
+        pattern = r"\[VARIANT_(\d+)\]\s*```java\s*\n(.*?)\n```"
+        matches = re.findall(pattern, llm_response, re.DOTALL)
+        if matches:
+            for idx, code in matches:
+                candidates[f"v{idx}"] = code
+        else:
+            # Fallback if LLM didn't format tags strictly
+            blocks = re.findall(r"```java\s*\n(.*?)\n```", llm_response, re.DOTALL)
+            for idx, code in enumerate(blocks, start=1):
+                candidates[f"v{idx}"] = code
+
+        if not candidates:
+            single = self.extract_code_block(llm_response)
+            if single:
+                candidates["v1"] = single
+
+        return candidates
+
+    def fallback_refactor(self, finding: dict, file_content: str) -> str:
+        variants = self.fallback_multi_variant(finding, file_content)
+        return variants.get("v1", file_content)
+
+    def fallback_multi_variant(self, finding: dict, file_content: str) -> Dict[str, str]:
+        """Generates multiple candidate variants offline using taxonomy templates (FIX_VARIANTS.md)."""
+        file_path = finding.get("file", "")
+        pdf_tax = finding.get("pdf_taxonomy", [])
+        mechanism = finding.get("mechanism", "").lower()
+        candidates = {}
+
+        # 1. N+1 Queries (NPlusOneService.java)
+        if "nplusoneservice" in file_path.lower() or "t6" in pdf_tax or "n+1" in mechanism:
+            candidates["v1"] = re.sub(
+                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
+                'List<Department> departments = departmentRepository.findAllWithEmployeesOptimal();',
+                file_content
+            )
+            candidates["v2"] = re.sub(
+                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
+                'List<Department> departments = departmentRepository.findAllEntityGraph();',
+                file_content
+            )
+            candidates["v3"] = re.sub(
+                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
+                'List<Department> departments = departmentRepository.findAllDtoProjection();',
+                file_content
+            )
+
+        # 2. In-Memory Filter & Pagination (InMemoryFilterService.java)
+        elif "inmemoryfilterservice" in file_path.lower() or "t8" in pdf_tax or "in-memory" in mechanism:
+            candidates["v1"] = re.sub(
+                r'public\s+List<OrderSummaryDto>\s+getOrdersByStatusSubOptimal\([^)]*\)\s*\{[^}]*\}',
+                '''public List<OrderSummaryDto> getOrdersByStatusSubOptimal(String status, int page, int size) {
+        // Variant 1 (PageRequest): Push WHERE & LIMIT/OFFSET to DB
+        return orderRepository.findByStatusOptimal(status, org.springframework.data.domain.PageRequest.of(page, size))
+                .getContent();
+    }''',
+                file_content, flags=re.DOTALL
+            )
+            candidates["v2"] = re.sub(
+                r'public\s+List<OrderSummaryDto>\s+getOrdersByStatusSubOptimal\([^)]*\)\s*\{[^}]*\}',
+                '''public List<OrderSummaryDto> getOrdersByStatusSubOptimal(String status, int page, int size) {
+        // Variant 2 (Slice): Avoid COUNT(*) total query overhead
+        return orderRepository.findSliceByStatus(status, org.springframework.data.domain.PageRequest.of(page, size))
+                .getContent();
+    }''',
+                file_content, flags=re.DOTALL
+            )
+
+        # 3. Save in Loop (SaveInLoopService.java)
+        elif "saveinloopservice" in file_path.lower() or ("t6" in pdf_tax and "save" in mechanism) or "batching" in mechanism:
+            candidates["v1"] = re.sub(
+                r'for\s*\([^)]*\)\s*\{[^}]*employeeRepository\.save\(emp\);[^}]*\}',
+                '''List<Employee> employeesToSave = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            employeesToSave.add(new Employee("SubOptFirst" + i, "SubOptLast" + i, "subopt" + i + "@example.com", BigDecimal.valueOf(50000 + i), "Heavy bio " + i, null));
+        }
+        employeeRepository.saveAll(employeesToSave);''',
+                file_content, flags=re.DOTALL
+            )
+
+        # 4. Full Entity Fetch (FullEntityFetchService.java)
+        elif "fullentityfetchservice" in file_path.lower() or "t3" in pdf_tax or "projection" in mechanism:
+            candidates["v1"] = re.sub(
+                r'public\s+List<EmployeeSimpleDto>\s+getEmployeesSubOptimal\(\)\s*\{[^}]*\}',
+                '''public List<EmployeeSimpleDto> getEmployeesSubOptimal() {
+        // Variant 1: Interface Projection
+        return employeeRepository.findAllProjectedBy().stream()
+                .map(p -> new EmployeeSimpleDto(p.getId(), p.getFirstName(), p.getLastName(), p.getEmail()))
+                .toList();
+    }''',
+                file_content, flags=re.DOTALL
+            )
+
+        if not candidates:
+            candidates["v1"] = file_content
+
+        return candidates
+
+    def process_finding(self, finding: dict, root_dir: str, dry_run: bool = False, force_offline: bool = False, multi_variant: bool = False, enable_jfr: bool = False) -> bool:
         rel_file = finding.get("file")
         if not rel_file:
             self.logger.log("WARNING", "Finding missing 'file' attribute. Skipping.")
@@ -189,53 +248,118 @@ class LLMAgent:
             return False
 
         self.logger.log("INFO", f"Processing finding for file: {rel_file} (Lines {finding.get('line_from')}-{finding.get('line_to')})")
-        self.logger.log("INFO", f"Taxonomy: {finding.get('pdf_taxonomy')} | Family: {finding.get('family')}")
-        self.logger.log("INFO", f"Mechanism: {finding.get('mechanism')}")
-        self.logger.log("INFO", f"Recommended Fix: {finding.get('fix')}")
+        self.logger.log("INFO", f"Taxonomy: {finding.get('pdf_taxonomy')} | Mechanism: {finding.get('mechanism')}")
 
         with open(abs_file, "r", encoding="utf-8") as f:
             original_code = f.read()
 
-        new_code = None
+        candidates = {}
 
-        if not force_offline and self.is_api_configured():
-            prompt = f"""Target File: {rel_file}
+        if multi_variant or enable_jfr:
+            self.logger.log("INFO", "Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.")
+            if not force_offline and self.is_api_configured():
+                prompt = f"""Target File: {rel_file}
 Line Range: {finding.get('line_from')} to {finding.get('line_to')}
 Taxonomy Codes: {finding.get('pdf_taxonomy')}
-Issue Family: {finding.get('family')}
 Mechanism / Bottleneck: {finding.get('mechanism')}
-Recommended Fix: {finding.get('fix')}
 
 Existing Java File Content:
 ```java
 {original_code}
 ```
+Please output 3 distinct refactoring candidates according to Multi-Variant instructions."""
+                try:
+                    self.logger.log("INFO", f"Requesting multi-variant options from LLM ({self.model})...")
+                    resp = self.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
+                    candidates = self.extract_multi_code_blocks(resp)
+                    self.logger.log("INFO", f"Extracted {len(candidates)} candidate variant(s) from LLM.")
+                except Exception as e:
+                    self.logger.log("WARNING", f"LLM Multi-Variant call failed ({e}). Using offline taxonomy candidates.")
+                    candidates = self.fallback_multi_variant(finding, original_code)
+            else:
+                candidates = self.fallback_multi_variant(finding, original_code)
 
-Please rewrite the entire Java file with the optimal implementation resolving the issue above while preserving standard class definitions, package names, and imports."""
-            try:
-                self.logger.log("INFO", f"Requesting LLM refactoring from model {self.model}...")
-                llm_response = self.call_llm(prompt)
-                self.logger.log("DEBUG", f"LLM Raw Output Length: {len(llm_response)} chars")
-                new_code = self.extract_code_block(llm_response)
-            except Exception as e:
-                self.logger.log("WARNING", f"LLM call failed ({str(e)}). Falling back to offline refactoring engine.")
-                new_code = self.fallback_refactor(finding, original_code)
-        else:
-            new_code = self.fallback_refactor(finding, original_code)
+            if dry_run:
+                self.logger.log("INFO", f"[DRY RUN] Generated {len(candidates)} candidate variants for {rel_file}.")
+                return True
 
-        if dry_run:
-            self.logger.log("INFO", f"[DRY RUN] Would write updated content to {rel_file} (Length: {len(new_code)} chars).")
+            # Evaluate candidate variants with build & JFR profiling
+            self.logger.log("INFO", f"Evaluating {len(candidates)} candidate variants for {rel_file}...")
+            
+            def apply_patch(code: str) -> bool:
+                try:
+                    with open(abs_file, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    return True
+                except Exception:
+                    return False
+
+            def verify_build() -> bool:
+                return self.verify_maven_build(root_dir)
+
+            winning_code = original_code
+            winning_name = None
+
+            if HAS_MULTI_JFR_EVAL:
+                eval_res = evaluate_variant_candidates(candidates=candidates, apply_func=apply_patch, verify_func=verify_build)
+                winner_id = eval_res.get("winning_candidate")
+                if winner_id and winner_id in candidates:
+                    winning_name = winner_id
+                    winning_code = candidates[winner_id]
+                    self.logger.log("SUCCESS", f"🏆 Winning Variant Selected: [{winner_id}] with optimal performance score: {eval_res['best_score']:.2f}")
+                else:
+                    self.logger.log("WARNING", "No candidate variant passed build/verification. Rolling back to original.")
+                    apply_patch(original_code)
+                    return False
+            else:
+                # Basic fallback if evaluator module not loaded
+                for var_name, code in candidates.items():
+                    apply_patch(code)
+                    if verify_build():
+                        winning_name = var_name
+                        winning_code = code
+                        break
+                if not winning_name:
+                    apply_patch(original_code)
+                    return False
+
+            # Apply final winning code
+            apply_patch(winning_code)
+            self.logger.log("SUCCESS", f"Applied winning variant [{winning_name}] to {rel_file}.")
             return True
 
-        if new_code == original_code:
-            self.logger.log("WARNING", f"No changes produced for {rel_file}.")
-            return False
+        else:
+            # Single-variant mode
+            new_code = None
+            if not force_offline and self.is_api_configured():
+                prompt = f"""Target File: {rel_file}
+Line Range: {finding.get('line_from')} to {finding.get('line_to')}
+Taxonomy Codes: {finding.get('pdf_taxonomy')}
+Mechanism / Bottleneck: {finding.get('mechanism')}
 
-        with open(abs_file, "w", encoding="utf-8") as f:
-            f.write(new_code)
+Existing Java File Content:
+```java
+{original_code}
+```
+Please rewrite the entire Java file with the optimal implementation."""
+                try:
+                    llm_response = self.call_llm(prompt)
+                    new_code = self.extract_code_block(llm_response)
+                except Exception as e:
+                    self.logger.log("WARNING", f"LLM call failed ({e}). Falling back to offline refactoring engine.")
+                    new_code = self.fallback_refactor(finding, original_code)
+            else:
+                new_code = self.fallback_refactor(finding, original_code)
 
-        self.logger.log("SUCCESS", f"Successfully applied refactoring to {rel_file}.")
-        return True
+            if dry_run:
+                self.logger.log("INFO", f"[DRY RUN] Would write updated content to {rel_file}.")
+                return True
+
+            with open(abs_file, "w", encoding="utf-8") as f:
+                f.write(new_code)
+
+            self.logger.log("SUCCESS", f"Successfully applied refactoring to {rel_file}.")
+            return True
 
     def verify_maven_build(self, root_dir: str) -> bool:
         self.logger.log("INFO", "Executing Maven verification (mvn test-compile)...")
@@ -245,7 +369,7 @@ Please rewrite the entire Java file with the optimal implementation resolving th
                 self.logger.log("SUCCESS", "Maven test-compile PASSED cleanly.")
                 return True
             else:
-                self.logger.log("ERROR", f"Maven test-compile FAILED:\n{res.stdout}\n{res.stderr}")
+                self.logger.log("ERROR", f"Maven test-compile FAILED:\n{res.stderr or res.stdout}")
                 return False
         except Exception as e:
             self.logger.log("ERROR", f"Failed to execute mvn test-compile: {str(e)}")
@@ -266,7 +390,7 @@ def load_findings(report_path: str) -> list:
         raise ValueError("Unrecognized report schema. Expected 'findings' key or JSON list.")
 
 def main():
-    parser = argparse.ArgumentParser(description="LLM-Based Code Refactoring Agent")
+    parser = argparse.ArgumentParser(description="LLM-Based Code Refactoring & Multi-Variant JFR Evaluation Agent")
     parser.add_argument("--report", default="reports/sandbox/findings.json", help="Path to findings JSON report")
     parser.add_argument("--src-dir", default=".", help="Root directory of the target project")
     parser.add_argument("--model", help="LLM model name (e.g. deepseek-chat, gpt-4o)")
@@ -275,19 +399,19 @@ def main():
     parser.add_argument("--offline", action="store_true", help="Force offline deterministic pattern refactoring")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
+    parser.add_argument("--multi-variant", action="store_true", help="Generate all possible candidate variants (T1-T9) for each bottleneck")
+    parser.add_argument("--enable-jfr", action="store_true", help="Capture JFR profiles across candidate variants and select winner by performance score")
     parser.add_argument("--benchmark-all-variants", action="store_true", help="Run multi-variant feature toggle benchmarking suite to select winner")
     args = parser.parse_args()
 
     root_dir = os.path.abspath(args.src_dir)
     logger = LLMAgentLogger()
-    logger.log("INFO", "=== STARTING LLM CODE REFACTORING AGENT ===")
+    logger.log("INFO", "=== STARTING LLM CODE REFACTORING & JFR EVALUATION AGENT ===")
 
-    # Resolve report path
     report_path = args.report
     if not os.path.isabs(report_path):
         report_path = os.path.join(root_dir, report_path)
 
-    # Fallback to export_report generator if report file missing
     if not os.path.exists(report_path):
         export_script = os.path.join(root_dir, "scripts", "export_report.py")
         if os.path.exists(export_script):
@@ -307,7 +431,14 @@ def main():
     modified_count = 0
 
     for finding in findings:
-        success = agent.process_finding(finding, root_dir=root_dir, dry_run=args.dry_run, force_offline=args.offline)
+        success = agent.process_finding(
+            finding,
+            root_dir=root_dir,
+            dry_run=args.dry_run,
+            force_offline=args.offline,
+            multi_variant=args.multi_variant,
+            enable_jfr=args.enable_jfr
+        )
         if success:
             modified_count += 1
 
@@ -329,4 +460,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

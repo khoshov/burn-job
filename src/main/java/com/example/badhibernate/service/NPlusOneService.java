@@ -66,11 +66,23 @@ public class NPlusOneService {
     }
 
     /**
-     * OPTIMAL FIX: Uses default optimal implementation (Variant 1.1).
+     * OPTIMAL FIX: Uses batch fetching strategy to eliminate N+1 queries.
+     * This variant uses Hibernate's @BatchSize or spring.jpa.properties.hibernate.default_batch_fetch_size
+     * to fetch lazy collections in batches instead of one-by-one.
      */
     @Transactional(readOnly = true)
     public List<DepartmentDto> getDepartmentsOptimal() {
-        return getDepartmentsVariant1_JoinFetch();
+        List<Department> departments = departmentRepository.findAll(); // 1 Query
+        // With batch fetching configured (e.g., @BatchSize(size = 20) on employees collection),
+        // the lazy initialization of d.getEmployees().size() will trigger only N/20 queries instead of N queries.
+        return departments.stream()
+                .map(d -> new DepartmentDto(
+                        d.getId(),
+                        d.getName(),
+                        d.getLocation(),
+                        d.getEmployees().size() // Now triggers batch queries instead of N individual queries
+                ))
+                .toList();
     }
 
     /**

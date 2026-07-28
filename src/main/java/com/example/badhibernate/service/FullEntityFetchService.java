@@ -1,7 +1,6 @@
 package com.example.badhibernate.service;
 
 import com.example.badhibernate.dto.EmployeeSimpleDto;
-import com.example.badhibernate.entity.Employee;
 import com.example.badhibernate.repository.EmployeeRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,13 +17,13 @@ public class FullEntityFetchService {
     }
 
     /**
-     * ANTIPATTERN (SubOptimal): Loads full @Entity objects along with heavy @Lob columns (detailedBiography).
+     * OPTIMIZED VARIANT 1: Uses Spring Data JPA Interface Projection with explicit column selection.
+     * Eliminates full entity fetch and heavy @Lob column loading.
      */
     @Transactional(readOnly = true)
     public List<EmployeeSimpleDto> getEmployeesSubOptimal() {
-        List<Employee> employees = employeeRepository.findAll();
-        return employees.stream()
-                .map(e -> new EmployeeSimpleDto(e.getId(), e.getFirstName(), e.getLastName(), e.getEmail()))
+        return employeeRepository.findAllProjectedBy().stream()
+                .map(p -> new EmployeeSimpleDto(p.getId(), p.getFirstName(), p.getLastName(), p.getEmail()))
                 .toList();
     }
 
