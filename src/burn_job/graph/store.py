@@ -31,7 +31,7 @@ class KuzuGraphStore:
         if not HAS_KUZU:
             logger.warning("KuzuDB python package not installed.")
             return
-        os.makedirs(self.db_path, exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
         try:
             self.db = kuzu.Database(self.db_path)
             self.conn = kuzu.Connection(self.db)

@@ -16,7 +16,7 @@ Complete structural refactoring of `burn-job` codebase into 6 domain-driven sub-
 
 **Storage**: KùzuDB embedded graph database (`store.py`, `ingest.py`)
 
-**Testing**: Standard `unittest` / `pytest` suite
+**Testing**: `pytest` framework with `pytest-cov` (target >= 90% code coverage)
 
 **Target Platform**: Linux / macOS cross-platform CLI & Orchestration Engine
 

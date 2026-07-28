@@ -1,459 +1,203 @@
 # Burn Job — Performance Optimization Pipeline & Codebase Refactoring Engine
 
-**Версия:** 0.1.0 | **Python:** >= 3.10
+**Версия:** 0.1.0 | **Python:** >= 3.10 | **Лицензия:** MIT
 
-Автономный пайплайн для статического и динамического анализа производительности Java-приложений с автоматической генерацией оптимизированного кода. Сочетает графовую аналитику (KùzuDB), статический анализ байткода, профилирование через async-profiler / JFR и LLM-генерацию исправлений.
-
----
-
-## Стек технологий
-
-| Компонент | Технология | Назначение |
-|-----------|-----------|------------|
-| Язык | Python >= 3.10 | Оркестрация и аналитика |
-| База данных | KùzuDB (встраиваемая) | Графовый движок: хранение стектрейсов, вызовов, SQL-запросов |
-| LLM | OpenAI-совместимые (DeepSeek, GigaChat, OpenAI) | Генерация кода и оценка вариантов |
-| Шаблонизатор | Jinja2 | Промпты для LLM |
-| Статический анализ | `javap` (байткод), AST (исходники) | Построение графа вызовов, поиск паттернов |
-| Профилирование | async-profiler / JFR (Java) | Сбор CPU, allocation, contention событий |
+Autonomous agentic pipeline for static bytecode analysis, dynamic profiler trace ingestion, and LLM-driven performance refactoring of Java applications.
 
 ---
 
-## Архитектура
+## 📋 Описание проекта
 
+**Burn Job** — это полностью автономная система анализа и оптимизации производительности Java-приложений (в первую очередь REST-сервисов на базе Spring Boot). Пайплайн комбинирует статический анализ байткода (`javap`) и AST исходного кода, динамический инжест вызовов из профайлера (async-profiler / JFR) во встраиваемую графовую БД **KùzuDB**, автоматическую генерацию нагрузочных скриптов и итеративный рефакторинг кода через LLM-агента.
+
+---
+
+## 🛠 Матрица зависимостей
+
+### Python-библиотеки (`pyproject.toml`)
+
+| Зависимость | Версия | Назначение / Роль |
+|-------------|--------|-------------------|
+| **`kuzu`** | `>= 0.3.0` | Встраиваемая графовая СУБД KùzuDB: хранение стектрейсов, узлов методов, графов вызовов (CALLS) и SQL-запросов |
+| **`jinja2`** | `>= 3.0.0` | Шаблонизатор промптов для LLM-агента генерации оптимизированных вариантов кода |
+| **`pytest`** *(test)* | `>= 8.0.0` | Основной фреймворк запуска unit, integration и contract тестов |
+| **`pytest-cov`** *(test)* | `>= 5.0.0` | Сборщик покрытия кода тестами (`--cov=burn_job`) |
+
+### Системное окружение и внешние инструменты
+
+| Инструмент | Минимальная версия | Назначение |
+|------------|-------------------|------------|
+| **Python** | `>= 3.10` | Основной язык оркестрации и аналитических модулей |
+| **Java JDK** | `>= 17` | Среда компиляции и выполнения целевого Java-приложения |
+| **Apache Maven** | `>= 3.8` | Автоматическая компиляция (`mvn test-compile`) и верификация вариантов кода |
+| **async-profiler / JFR** | `>= 2.9` | Профилирование CPU, выделения памяти (GC allocations) и блокировок потоков в формате `.collapsed` / `.jfr` |
+
+---
+
+## 🏛 Модульная архитектура пакета (`burn_job`)
+
+Архитектура распределена по **6 строго изолированным доменным суб-пакетам** с однонаправленным потоком зависимостей:
+
+```text
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            burn_job.cli                                  │
+│                 (Параметры CLI, совместимость флагов)                     │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼─────────────────────────────────────┐
+│                          burn_job.pipeline                               │
+│  (AutonomousOrchestrator, ControllerScanner, LoadtestGen, Scorer)         │
+└──────────────────┬──────────────────────────────────────┬────────────────┘
+                   │                                      │
+┌──────────────────▼──────────────────┐ ┌─────────────────▼────────────────┐
+│         burn_job.detectors          │ │         burn_job.graph           │
+│ (RuleEngine, BaseDetector, T1–T9)   │ │  (KuzuGraphStore, TraceIngestor) │
+└──────────────────┬──────────────────┘ └─────────────────┬────────────────┘
+                   │                                      │
+                   └──────────────────┬───────────────────┘
+                                      │
+┌─────────────────────────────────────▼────────────────────────────────────┐
+│                           burn_job.domain                                │
+│       (Finding, EndpointInfo, Metric, CodeVariant, PipelineContext)      │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼─────────────────────────────────────┐
+│                            burn_job.core                                 │
+│          (Config, Exceptions, Structured Logger, typing.Protocols)       │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          burn-job CLI                                │
-│  scan │ ingest │ run-cycle                                          │
-└──────────────────┬──────────────────────────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────────────────────────┐
-│                    AutonomousOrchestrator (8-step cycle)             │
-│  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐ │
-│  │ Сканер  │ │Генератор │ │ Загрузка │ │ Инжест  │ │ Анализатор│ │
-│  │контрол- │ │тестов    │ │ тестов   │ │профайла │ │ T1-T9     │ │
-│  │леров    │ │нагрузки  │ │          │ │в KùzuDB │ │           │ │
-│  └─────────┘ └──────────┘ └──────────┘ └──────────┘ └─────┬─────┘ │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────────┴─────┐ │
-│  │ LLM      │ │Верифика-│ │ Экспорт  │ │  Static Analysis     │ │
-│  │цикл     │ │ция сборки│ │ отчёта   │ │  (javap, AST, regex) │ │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
-```
 
-### Трёхуровневая архитектура анализа
+### Подробный обзор суб-пакетов
 
-1. **Статический слой (исходный код/AST):**
-   - Детекторы: N+1, Full Fetch для existence check, Nested Loops, Duplicate Methods
-   - Анализ сложности: глубина вложенности, линейные поиски в циклах
-   - Оценка object layout: статическая эвристика полей
+#### 1. `burn_job.core`
+Ядро инфраструктуры и базовые примитивы системы:
+- [config.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/core/config.py) — Централизованные настройки с поддержкой переменных окружения (`BURN_JOB_DB_PATH`, `BURN_JOB_HOST`, `BURN_JOB_CONCURRENCY`).
+- [exceptions.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/core/exceptions.py) — Иерархия исключений (`BurnJobError`, `GraphStoreError`, `DetectorExecutionError`, `PipelineExecutionError`).
+- [logging.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/core/logging.py) — Конфигуратор структурированных логов с файловой и консольной трассировкой.
+- [protocols.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/core/protocols.py) — Строгие интерфейсные контракты `typing.Protocol` (`DetectorProtocol`, `StoreProtocol`, `ReportBuilderProtocol`).
 
-2. **Байткод-слой (`javap`):**
-   - Построение полного графа вызовов (call graph)
-   - Вычисление reachability (BFS от entry points)
-   - Обнаружение dead code (статистически невызываемые методы с 0 сэмплами)
+#### 2. `burn_job.domain`
+Неизменяемые сущности доменной модели и DTOs:
+- [finding.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/finding.py) — Доменная модель найденного дефекта (`Finding`, `Severity`, `SourceLocation`, `Anomaly`).
+- [endpoint.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/endpoint.py) — Модель Spring REST эндпоинта (`EndpointInfo`).
+- [metrics.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/metrics.py) — Метрики профилирования (`Metric`, `MetricSource`, `LatencyStats`, `MicrometerMetrics`).
+- [variant.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/variant.py) — Варианты оптимизированного кода (`CodeVariant`, `ScoringResult`).
+- [pipeline_context.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/domain/pipeline_context.py) — Контейнер общего состояния выполнения пайплайна (`PipelineContext`, `PipelineStatus`).
 
-3. **Динамический слой (профайлер / KùzuDB):**
-   - Инжест collapsed-формата async-profiler в графовую БД
-   - 9 таксономических анализаторов (T1–T9) через Cypher-запросы
-   - Классификация non-defect (ND-1 – ND-7)
-   - Differential analysis: сравнение baseline vs candidate run
+#### 3. `burn_job.detectors`
+Движок обнаружения проблем производительности:
+- [base.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/base.py) — Абстрактный базовый класс `BaseDetector`, реализующий `DetectorProtocol`.
+- [rule_engine.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/rule_engine.py) — Движок регистрации и параллельного запуска детекторов.
+- [taxonomy/](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/detectors/taxonomy) — 9 классификаторов дефектов (T1–T9):
+  - **T1**: Избыточные вычисления и операции в циклах
+  - **T2**: Неэффективные алгоритмы и структуры данных
+  - **T3**: Некорректное использование библиотечных функций
+  - **T4**: Неоптимальное размещение объектов в памяти
+  - **T5**: Избыточные проверки (Full Fetch vs existence check)
+  - **T6**: N+1 и неоптимальные БД-запросы
+  - **T7**: Утечки памяти (Memory Leaks)
+  - **T8**: Раздувание памяти (Memory Bloat)
+  - **T9**: Горячие точки CPU (CPU Hotspots)
+
+#### 4. `burn_job.graph`
+Модуль интеграции с встраиваемой графовой СУБД KùzuDB:
+- [store.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/graph/store.py) — Клиент KùzuDB (`KuzuGraphStore`), инициализация Cypher-схемы (узлы `Method`, `SqlStatement`, `Issue`, связи `CALLS`, `EXECUTES`).
+- [ingest.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/graph/ingest.py) — Парсер трейсов профайлера в стеки вызовов.
+
+#### 5. `burn_job.pipeline`
+Оркестратор 8-этапного цикла авто-оптимизации:
+- [scanner.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/pipeline/scanner.py) — Сканер `@RestController` и `@GetMapping` аннотаций в Java AST.
+- [loadtest.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/pipeline/loadtest.py) — Генератор автономных Python-скриптов нагрузочного тестирования.
+- [scorer.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/pipeline/scorer.py) — Расчёт качества вариантов по формуле: `Score = 0.6 * ΔLatency_p95 + 0.3 * ΔRPS + 0.1 * ΔGC`.
+- [orchestrator.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/pipeline/orchestrator.py) — `AutonomousOrchestrator` полного цикла.
+
+#### 6. `burn_job.cli`
+Единая точка входа для работы из командной строки:
+- [cli.py](file:///Users/stanislavkhoshov/Documents/burn-job/src/burn_job/cli.py) — Диспетчер команд `scan`, `ingest`, `run-cycle`, `version` с выдачей предупреждений при вызове устаревших параметров.
 
 ---
 
-## Установка
+## 🔄 8-Этапный цикл автономной оптимизации
+
+```text
+  ┌────────────────┐      ┌────────────────┐      ┌────────────────┐      ┌────────────────┐
+  │  1. Сканирование│ ───► │  2. Генерация  │ ───► │ 3. Исполнение  │ ───► │   4. Инжест    │
+  │   контроллеров │      │ нагруз. тестов │      │ нагруз. тестов │      │ трейсов в Kùzu │
+  └────────────────┘      └────────────────┘      └────────────────┘      └───────┬────────┘
+                                                                                  │
+  ┌────────────────┐      ┌────────────────┐      ┌────────────────┐              │
+  │  8. Выбор      │ ◄─── │   7. Maven     │ ◄─── │  6. LLM Цикл   │ ◄────────────┘
+  │   победителя   │      │  верификация   │      │  рефакторинга  │ ◄─── 5. Детекция дефектов (T1-T9)
+  └────────────────┘      └────────────────┘      └────────────────┘
+```
+
+1. **Сканирование эндпоинтов**: Извлечение всех Spring REST путей, HTTP-методов и параметров.
+2. **Генерация нагрузки**: Создание многопоточного скрипта нагрузочного тестирования.
+3. **Запуск нагрузки**: Прогрев и подача целевого RPS на приложение.
+4. **Графовый инжест**: Преобразование стектрейсов async-profiler в граф узлов методов в KùzuDB.
+5. **Поиск аномалий**: Выполнение Cypher-запросов и запуск правил таксономии T1–T9.
+6. **LLM-рефакторинг**: Генерация оптимизированного Java-кода для каждого дефекта.
+7. **Верификация сборки**: Проверка компилируемости изменённого кода через `mvn test-compile`.
+8. **Оценка и выбор победителя**: Оценка прироста производительности и сохранение победившего варианта.
+
+---
+
+## 🚀 Быстрый старт и установка
+
+### Установка в режиме разработки
 
 ```bash
 # Клонирование репозитория
-git clone <repo-url>
+git clone https://github.com/khoshov/burn-job.git
 cd burn-job
 
-# Установка в редактируемом режиме (рекомендуется для разработки)
-pip install -e .
+# Установка зависимостей и пакета в editable-режиме
+pip install -e ".[test]"
 
-# Или через uv
-uv pip install -e .
+# Или через uv (рекомендуется)
+uv pip install -e ".[test]"
 ```
-
-### Зависимости
-
-Обязательные:
-- `kuzu` — встраиваемая графовая БД
-- `jinja2` — шаблонизация промптов (если не установлен — используется JSON fallback)
-
-Опциональные:
-- `openai` — вызов LLM через API
 
 ---
 
-## CLI-команды
-
-### `burn-job scan`
-
-Сканирует Java-контроллеры Spring на наличие REST-эндпоинтов.
+## 💻 Использование CLI
 
 ```bash
-burn-job scan --src ./java/src/main/java
-```
-
-**Аргументы:**
-
-| Аргумент | По умолчанию | Описание |
-|----------|-------------|----------|
-| `--src` | `config.REPO_ROOT / 'src/main/java'` | Путь к Java-исходникам |
-
-**Выход:** JSON-список `EndpointInfo` с путём, методом, контроллером, файлом и строкой.
-
-### `burn-job ingest`
-
-Загружает профилировочные данные (collapsed-формат async-profiler) в KùzuDB.
-
-```bash
-burn-job ingest --profile app_profiling_full.collapsed --db profiler_graph.db
-```
-
-**Аргументы:**
-
-| Аргумент | По умолчанию | Описание |
-|----------|-------------|----------|
-| `--profile` | `config.DEFAULT_PROFILE_PATH` | Путь к collapsed-файлу |
-| `--db` | `config.DEFAULT_DB_PATH` | Путь к файлу базы данных KùzuDB |
-
-**Процесс инжеста:**
-- Парсинг строк `frame1;frame2;... N`
-- MERGE узлов `Method` (deduplicated по FQN)
-- CREATE рёбер `CALLS` с подсчётом сэмплов
-- Создание узлов `SqlStatement` и рёбер `EXECUTES` при наличии SQL-фреймов
-
-### `burn-job run-cycle`
-
-Запускает полный автономный 8-шаговый цикл оптимизации.
-
-```bash
-burn-job run-cycle --db profiler_graph.db --profile app_profiling_full.collapsed --host http://localhost:8080 --online
-```
-
-**Аргументы:**
-
-| Аргумент | По умолчанию | Описание |
-|----------|-------------|----------|
-| `--db` | `config.DEFAULT_DB_PATH` | Путь к KùzuDB |
-| `--profile` | `config.DEFAULT_PROFILE_PATH` | Путь к collapsed-файлу |
-| `--host` | `http://localhost:8080` | Базовый URL целевого приложения |
-| `--online` | `False` | Флаг: использовать LLM API (иначе — offline regex-рефакторинг) |
-
-**8-шаговый цикл:**
-
-| Шаг | Компонент | Описание |
-|-----|-----------|----------|
-| 1 | `ControllerScanner` | Сканирование REST-контроллеров |
-| 2 | `LoadtestGenerator` | Генерация скрипта нагрузочного теста |
-| 3 | API Load Test | Исполнение теста (50 коннектов, 5 сек) |
-| 4 | `KuzuGraphStore.ingest_profile` | Инжест профайла в граф |
-| 5 | Taxonomy Analysts (T1–T9) | Детекция аномалий |
-| 6–7 | `iterative_agent_loop` | LLM-цикл рефакторинга (генерация → компиляция → оценка) |
-| 8 | Maven Verify | Проверка сборки `mvn test-compile` |
-
----
-
-## Система таксономии T1–T9
-
-Девять категорий дефектов производительности, каждый со своим анализатором:
-
-| ID | Категория | Файл | Что детектит | Метод |
-|----|-----------|------|-------------|-------|
-| **T1** | Redundant Operations | `t1_redundant_ops.py` | Избыточные конкатенации строк в циклах | Cypher-правило `EXCESSIVE_STRING_CONCAT` |
-| **T2** | Inefficient Algorithms | `t2_inefficient_algos.py` | Линейные поиски в циклах; квадратичные вложенные циклы | Cypher-правило + кастомный Cypher |
-| **T3** | Improper Function Usage | `t3_improper_func_usage.py` | Тяжёлая загрузка entity; full fetch для existence check | Cypher-правила |
-| **T4** | Data Layout & Allocation | `t4_data_layout.py` | Array allocation pressure; boxing overhead; wasted field padding | Cypher + статический анализ object layout |
-| **T5** | Redundant Checks | `t5_redundant_checks.py` | Dead code (unreachable + 0 samples); untested code; duplicate validation | Call graph BFS + статический доступ |
-| **T6** | Database Queries | `t6_db_queries.py` | N+1 queries; save in loop unbatched; connection pool starvation | Cypher-правила |
-| **T7** | Memory Leaks | `t7_memory_leak.py` | Retained object accumulation; unbounded growth trend; unbounded cache | JFR OldObjectSamples + cross-run diff |
-| **T8** | Memory Bloat | `t8_memory_bloat.py` | In-memory filtering; excessive string allocations; bounded collections | Stream API + allocation bytes анализ |
-| **T9** | CPU Hotspots | `t9_cpu_hotspots.py` | Thread lock contention; top CPU methods; regex recompile | MonitorBlock + топ-сэмплы |
-
-### Классификация Non-Defect (ND-1 – ND-7)
-
-После детекции аномалии проходят фильтр non-defect, исключающий ложные срабатывания:
-
-| ND-ID | Название | Механизм верификации |
-|-------|---------|---------------------|
-| ND-1 | Field ordering | Статическая оценка `object_layout.py` |
-| ND-2 | Bounded quadratic | Поиск `@Max` / `Math.min` в исходниках |
-| ND-3 | Bounded cache | Cross-run сравнение retained объектов |
-| ND-4 | Bounded request collection | Анализ рёбер графа (HTTPServletRequest context) |
-| ND-5 | Microbenchmark noise | Единичные сэмплы, ratio < threshold |
-| ND-6 | Code style | Pattern matching / Stream API без аллокаций |
-| ND-7 | Untested coverage gap | Call graph: reachable, 0 samples, нет тестов |
-
----
-
-## LLM-агент
-
-### Режимы работы
-
-1. **Offline (по умолчанию):** Детерминированные regex-замены без вызова API. Преобразования:
-   - Save in Loop → `saveAll()` с batching
-   - N+1 → `JOIN FETCH`
-   - String concat → `StringBuilder`
-   - Linear search → `HashSet`
-
-2. **Online (`--online`):** Вызов LLM через OpenAI-совместимый API. Формирует промпты на основе:
-   - `generator_prompt.jinja2` — генерация оптимизированного кода
-   - `evaluator_prompt.jinja2` — оценка и улучшение сгенерированного кода
-   - `error_prompt.jinja2` — исправление ошибок компиляции
-
-3. **Multi-variant:** Генерация 3+ вариантов с ранжированием через:
-   - HTTP-бенчмарки (SQL count, latency)
-   - JFR-профилирование (CPU samples)
-   - KùzuDB Cypher evaluation (веса сэмплов)
-
-### Системные промпты
-
-- `SYSTEM_PROMPT` — оптимизация Java 21 / Spring Boot 3
-- `SYSTEM_MULTI_VARIANT_PROMPT` — генерация 3+ вариантов с тегом `[VARIANT_N]`
-
----
-
-## Графовый движок KùzuDB
-
-### Схема данных
-
-```
-Nodes:
-  ─ Method {id, fqn, className, methodName, descriptor, isEntryPoint, isTest, ...}
-  ─ SqlStatement {id, text, type}
-  ─ Issue {id, taxonomy_id, category, type, severity, ...}
-
-Relationships:
-  ─ (m1)-[:CALLS {count, runId}]->(m2)
-  ─ (m)-[:EXECUTES {runId}]->(sql)
-  ─ (m)-[:HAS_DEFECT {runId}]->(issue)
-```
-
-### Структура правил (`rules/graph_rules.yaml`)
-
-13 предопределённых Cypher-правил:
-
-| Rule ID | Taxonomy | Тип узла | Паттерн |
-|---------|----------|---------|---------|
-| `SAVE_IN_LOOP_UNBATCHED` | T6, T1 | Edge | `.save(` в цикле |
-| `EXCESSIVE_STRING_CONCAT` | T1, T8 | Edge | `StringBuilder` в цикле |
-| `LINEAR_SEARCH_IN_LOOP` | T2 | Edge | `List.contains/indexOf` в цикле |
-| `HEAVY_ENTITY_FETCH` | T3 | Method | Entity → DTO конвертация |
-| `FULL_FETCH_FOR_EXISTENCE_CHECK` | T3 | Edge | `findAll()` → `isEmpty()` |
-| `N_PLUS_ONE_QUERIES` | T6 | Edge | Lazy collection init |
-| `CONNECTION_POOL_STARVATION` | T6 | Edge | `HikariPool.getConnection()` wait |
-| `ARRAY_ALLOCATION_PRESSURE` | T4 | Method | `new byte[N]` с N > 10K |
-| `UNBOUNDED_CACHE_OR_COLLECTION_GROWTH` | T7 | Edge | `Map.put` / `List.add` |
-| `BOUNDED_REQUEST_COLLECTION` | T8 | Edge | API-bounded collections |
-| `CPU_HOTSPOT_METHOD` | T9 | Method | Top CPU methods > 0.85% |
-| `MICROBENCHMARK_REGEX_COMPILE` | T9 | Edge | `Pattern.compile` (исключая Global) |
-
----
-
-## Модели данных
-
-### `EndpointInfo`
-```python
-@dataclass
-class EndpointInfo:
-    path: str           # /api/demo/n-plus-one/bad
-    http_method: str    # GET
-    controller_class: str  # AntipatternController
-    method_name: str    # getDepartmentsSubOptimal
-    file_path: str      # src/main/java/.../AntipatternController.java
-    line_number: int    # 42
-    query_params: list[str]
-```
-
-### `Anomaly` / `Finding`
-```python
-@dataclass
-class Anomaly:
-    taxonomy_id: str     # T6
-    category: str        # N_PLUS_ONE_QUERIES
-    type: str            # edge / method
-    caller: str          # FQN вызывающего метода
-    callee: str          # FQN вызываемого метода
-    sample_count: int
-    status: str          # open / non_defect
-    non_defect_rule: str  # ND-3
-    details: dict
-
-@dataclass
-class Finding:
-    id: str
-    taxonomy_id: str
-    category: str
-    type: str
-    title: str
-    description: str
-    file: str
-    line: int
-    status: str
-    evidence: dict
-```
-
-### `CodeVariant` / `ScoringResult`
-```python
-@dataclass
-class CodeVariant:
-    variant_id: str         # v1, v2, v3
-    target_file: str
-    code_content: str
-    compiles: bool
-    compile_error: str | None
-
-@dataclass
-class ScoringResult:
-    variant_id: str
-    latency_p95_delta_pct: float
-    rps_delta_pct: float
-    gc_delta_pct: float
-    score: float
-    is_winner: bool
-```
-
-### `LatencyStats` / `MicrometerMetrics`
-```python
-@dataclass
-class LatencyStats:
-    p50: float
-    p95: float
-    p99: float
-
-@dataclass
-class MicrometerMetrics:
-    endpoint: str
-    rps: float
-    latency: LatencyStats
-    gc_allocations_mb: float
-    error_count: int
-    total_requests: int
-```
-
----
-
-## Формула оценки
-
-Композитный score для ранжирования вариантов оптимизации:
-
-```
-Score = 0.6 * ΔLatency_p95% + 0.3 * ΔRPS% + 0.1 * ΔGC%
-```
-
-Где Δ — относительное улучшение между baseline и candidate (положительное значение = улучшение).
-
----
-
-## Скрипты и утилиты
-
-### Полная структура файлов
-
-```
-src/
-├── __init__.py                        # Версия пакета
-├── cli.py                             # CLI entry point (3 команды)
-├── config.py                          # Глобальные константы и пути
-├── logging_config.py                  # Централизованная настройка логирования
-│
-├── core/
-│   ├── orchestrator.py                # AutonomousOrchestrator (8-шаговый цикл)
-│   ├── generator.py                   # ControllerScanner + LoadtestGenerator
-│   ├── evaluator.py                   # ScoringEvaluator (весовая формула)
-│   └── graph_store.py                 # KuzuGraphStore (обёртка KùzuDB)
-│
-├── analyzers/
-│   ├── t1_redundant_ops.py            # T1: избыточные операции
-│   ├── t2_inefficient_algos.py        # T2: неэффективные алгоритмы
-│   ├── t3_improper_func_usage.py      # T3: неправильное использование функций
-│   ├── t4_data_layout.py              # T4: размещение данных и аллокации
-│   ├── t5_redundant_checks.py         # T5: мёртвый код и избыточные проверки
-│   ├── t6_db_queries.py               # T6: ошибки БД-запросов
-│   ├── t7_memory_leak.py              # T7: утечки памяти
-│   ├── t8_memory_bloat.py             # T8: раздувание памяти
-│   └── t9_cpu_hotspots.py             # T9: CPU hotspots и contention
-│
-├── models/
-│   ├── endpoint.py                    # EndpointInfo dataclass
-│   ├── finding.py                     # Anomaly + Finding dataclasses
-│   ├── metrics.py                     # LatencyStats + MicrometerMetrics
-│   └── variant.py                     # CodeVariant + ScoringResult
-│
-├── llm/
-│   └── __init__.py                    # Реэкспорт LLMAgent
-├── detection/
-│   ├── __init__.py                    # Реэкспорт детекторов
-│   └── base.py                        # BaseDetector + утилиты
-├── loop/
-│   └── __init__.py                    # Реэкспорт iterative_loop
-├── report/
-│   └── __init__.py                    # Реэкспорт билдеров отчётов
-├── prompts/
-│   ├── generator_prompt.jinja2        # Промпт генерации кода
-│   ├── evaluator_prompt.jinja2        # Промпт оценки кода
-│   └── error_prompt.jinja2            # Промпт исправления ошибок
-└── rules/
-    └── graph_rules.yaml               # 13 Cypher-правил
-
-# Автономные скрипты (top-level):
-├── llm_agent.py                       # LLM-агент (offline + online)
-├── analyze_anomalies.py               # Оркестратор T1–T9 + static detectors
-├── static_callgraph.py                # Статический граф вызовов (javap)
-├── static_pattern_detectors.py        # Структурные детекторы (N+1, nested loops, etc.)
-├── jfr_to_graph.py                    # Инжест профайла в KùzuDB (CLI)
-├── iterative_agent_loop.py            # SysLLMatic итеративный цикл
-├── complexity_analyzer.py             # AST-анализ сложности Java-кода
-├── source_mapping.py                  # FQN → исходный файл/строка
-├── object_layout.py                   # Статический object layout estimator
-├── differential_analysis.py           # Cross-run сравнение (baseline vs candidate)
-├── non_defects.py                     # Non-defect классификация (ND-1 – ND-7)
-├── rule_engine.py                     # Generic Cypher rule engine
-├── export_report.py                   # Генератор findings.json
-├── benchmark_variants.py              # Мульти-вариантный HTTP benchmark
-├── evaluate_variants_via_kuzu.py      # Cypher evaluation вариантов
-├── multi_variant_jfr_evaluator.py     # JFR + HTTP evaluator
-├── compare_runs.py                    # Устаревший differential analyzer
-├── generate_api_loadtests.py          # Генератор нагрузочных тестов
-├── verify_full_pipeline.py            # Smoke test пайплайна
-└── run_full_autonomous_cycle.py       # Обёртка AutonomousOrchestrator
-```
-
-### Ключевые точки расширения
-
-1. **Добавление нового анализатора T10+**: создать `analyzers/t10_*.py`, импортировать в `analyze_anomalies.py`, добавить правило в `rules/graph_rules.yaml`.
-2. **Новое Cypher-правило**: добавить YAML-блок в `graph_rules.yaml` с match/exclude/threshold.
-3. **Новый статический детектор**: реализовать в `static_pattern_detectors.py` или отдельном модуле, зарегистрировать в `detection/__init__.py`.
-4. **Новый ND-фильтр**: добавить правило в `non_defects.py` с верификацией и confidence.
-
----
-
-## Пример пайплайна
-
-```bash
-# Шаг 1: Установка пакета
-pip install -e .
-
-# Шаг 2: Сканирование REST-контроллеров
+# 1. Сканирование эндпоинтов Java-проекта
 burn-job scan --src ./java/src/main/java
 
-# Шаг 3: Запуск полного автономного цикла
-burn-job run-cycle --profile ./profiles/app.collapsed --online
+# 2. Инжест сэмпла профайлера в KùzuDB
+burn-job ingest --profile ./app_profiling_full.collapsed --db ./profiler_graph.db
 
-# Или пошагово:
-# 3a: Инжест профайла
-burn-job ingest --profile ./profiles/app.collapsed --db ./analysis.db
+# 3. Запуск полного 8-этапного автономного цикла
+burn-job run-cycle --db ./profiler_graph.db --host http://localhost:8080
 
-# 3b: Ручной запуск анализаторов
-python -m src.analyze_anomalies --db-path ./analysis.db --json
-
-# 3c: LLM-рефакторинг
-python -m src.llm_agent --finding '{"taxonomy_id":"T6","category":"N_PLUS_ONE_QUERIES",...}'
+# 4. Проверка версии CLI
+burn-job version
 ```
 
 ---
 
-## Лицензия
+## 🧪 Запуск тестов (`pytest`)
 
-MIT
+Тестовая сюита построена на базе **`pytest`** и **`pytest-cov`**:
+
+```bash
+# Запуск всех тестов с генерацией отчета о покрытии
+pytest
+
+# Запуск только юнитов
+pytest tests/unit/
+
+# Запуск интеграционных и контрактных тестов
+pytest tests/integration/ tests/contract/
+
+# Запуск с детальным отчетом по незакрытым строкам
+pytest --cov=burn_job --cov-report=term-missing
+```
+
+---
+
+## 📄 Лицензия
+
+Проект распространяется под лицензией MIT.

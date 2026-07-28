@@ -1,27 +1,27 @@
-"""End-to-end integration test for CLI subcommands."""
+"""Pytest integration test for CLI subcommands."""
 
-import unittest
+import os
 import subprocess
 import sys
 
-class TestCLIIntegration(unittest.TestCase):
+def _run_cli(args):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "src"
+    return subprocess.run([sys.executable, "-m", "burn_job.cli"] + args, capture_output=True, text=True, env=env)
 
-    def test_cli_help(self):
-        res = subprocess.run([sys.executable, "-m", "burn_job.cli", "--help"], capture_output=True, text=True)
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("scan", res.stdout)
-        self.assertIn("ingest", res.stdout)
-        self.assertIn("run-cycle", res.stdout)
+def test_cli_help():
+    res = _run_cli(["--help"])
+    assert res.returncode == 0
+    assert "scan" in res.stdout
+    assert "ingest" in res.stdout
+    assert "run-cycle" in res.stdout
 
-    def test_cli_version(self):
-        res = subprocess.run([sys.executable, "-m", "burn_job.cli", "version"], capture_output=True, text=True)
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("0.1.0", res.stdout)
+def test_cli_version():
+    res = _run_cli(["version"])
+    assert res.returncode == 0
+    assert "0.1.0" in res.stdout
 
-    def test_cli_scan(self):
-        res = subprocess.run([sys.executable, "-m", "burn_job.cli", "scan", "--help"], capture_output=True, text=True)
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("--src", res.stdout)
-
-if __name__ == "__main__":
-    unittest.main()
+def test_cli_scan():
+    res = _run_cli(["scan", "--help"])
+    assert res.returncode == 0
+    assert "--src" in res.stdout
