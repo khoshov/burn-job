@@ -5,3 +5,5 @@ target/
 .DS_Store
 .idea/
 *.class
+__pycache__/
+*.pyc
