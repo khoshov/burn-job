@@ -149,79 +149,8 @@ class LLMAgent:
 
         return candidates
 
-    def fallback_refactor(self, finding: dict, file_content: str) -> str:
-        variants = self.fallback_multi_variant(finding, file_content)
-        return variants.get("v1", file_content)
 
-    def fallback_multi_variant(self, finding: dict, file_content: str) -> Dict[str, str]:
-        file_path = finding.get("file", "")
-        pdf_tax = finding.get("pdf_taxonomy", [])
-        mechanism = finding.get("mechanism", "").lower()
-        candidates = {}
-
-        if "nplusoneservice" in file_path.lower() or "t6" in pdf_tax or "n+1" in mechanism:
-            candidates["v1"] = re.sub(
-                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
-                'List<Department> departments = departmentRepository.findAllWithEmployeesOptimal();',
-                file_content
-            )
-            candidates["v2"] = re.sub(
-                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
-                'List<Department> departments = departmentRepository.findAllEntityGraph();',
-                file_content
-            )
-            candidates["v3"] = re.sub(
-                r'List<Department>\s+departments\s*=\s*departmentRepository\.findAll\(\);',
-                'List<Department> departments = departmentRepository.findAllDtoProjection();',
-                file_content
-            )
-
-        elif "inmemoryfilterservice" in file_path.lower() or "t8" in pdf_tax or "in-memory" in mechanism:
-            candidates["v1"] = re.sub(
-                r'public\s+List<OrderSummaryDto>\s+getOrdersByStatusSubOptimal\([^)]*\)\s*\{[^}]*\}',
-                '''public List<OrderSummaryDto> getOrdersByStatusSubOptimal(String status, int page, int size) {
-        return orderRepository.findByStatusOptimal(status, org.springframework.data.domain.PageRequest.of(page, size))
-                .getContent();
-    }''',
-                file_content, flags=re.DOTALL
-            )
-            candidates["v2"] = re.sub(
-                r'public\s+List<OrderSummaryDto>\s+getOrdersByStatusSubOptimal\([^)]*\)\s*\{[^}]*\}',
-                '''public List<OrderSummaryDto> getOrdersByStatusSubOptimal(String status, int page, int size) {
-        return orderRepository.findSliceByStatus(status, org.springframework.data.domain.PageRequest.of(page, size))
-                .getContent();
-    }''',
-                file_content, flags=re.DOTALL
-            )
-
-        elif "saveinloopservice" in file_path.lower() or ("t6" in pdf_tax and "save" in mechanism) or "batching" in mechanism:
-            candidates["v1"] = re.sub(
-                r'for\s*\([^)]*\)\s*\{[^}]*employeeRepository\.save\(emp\);[^}]*\}',
-                '''List<Employee> employeesToSave = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            employeesToSave.add(new Employee("SubOptFirst" + i, "SubOptLast" + i, "subopt" + i + "@example.com", BigDecimal.valueOf(50000 + i), "Heavy bio " + i, null));
-        }
-        employeeRepository.saveAll(employeesToSave);''',
-                file_content, flags=re.DOTALL
-            )
-
-        elif "fullentityfetchservice" in file_path.lower() or "t3" in pdf_tax or "projection" in mechanism:
-            candidates["v1"] = re.sub(
-                r'public\s+List<EmployeeSimpleDto>\s+getEmployeesSubOptimal\(\)\s*\{[^}]*\}',
-                '''public List<EmployeeSimpleDto> getEmployeesSubOptimal() {
-        return employeeRepository.findAllProjectedBy().stream()
-                .map(p -> new EmployeeSimpleDto(p.getId(), p.getFirstName(), p.getLastName(), p.getEmail()))
-                .toList();
-    }''',
-                file_content, flags=re.DOTALL
-            )
-
-        if not candidates:
-            candidates["v1"] = file_content
-
-        return candidates
-
-    def process_finding(self, finding: dict, root_dir: str, dry_run: bool = False, force_offline: bool = False, multi_variant: bool = False, enable_jfr: bool = False) -> bool:
+    def process_finding(self, finding: dict, root_dir: str, dry_run: bool = False, multi_variant: bool = False, enable_jfr: bool = False) -> bool:
         rel_file = finding.get("file")
         if not rel_file:
             self.logger.log("WARNING", "Finding missing 'file' attribute. Skipping.")
@@ -242,7 +171,7 @@ class LLMAgent:
 
         if multi_variant or enable_jfr:
             self.logger.log("INFO", "Mode: Multi-Variant Refactoring & JFR Benchmark Selection Enabled.")
-            if not force_offline and self.is_api_configured():
+            if self.is_api_configured():
                 prompt = f"""Target File: {rel_file}
 Line Range: {finding.get('line_from')} to {finding.get('line_to')}
 Taxonomy Codes: {finding.get('pdf_taxonomy')}
@@ -259,10 +188,7 @@ Please output 3 distinct refactoring candidates according to Multi-Variant instr
                     candidates = self.extract_multi_code_blocks(resp)
                     self.logger.log("INFO", f"Extracted {len(candidates)} candidate variant(s) from LLM.")
                 except Exception as e:
-                    self.logger.log("WARNING", f"LLM Multi-Variant call failed ({e}). Using offline taxonomy candidates.")
-                    candidates = self.fallback_multi_variant(finding, original_code)
-            else:
-                candidates = self.fallback_multi_variant(finding, original_code)
+                    self.logger.log("WARNING", f"LLM Multi-Variant call failed ({e}).")
 
             if dry_run:
                 self.logger.log("INFO", f"[DRY RUN] Generated {len(candidates)} candidate variants for {rel_file}.")
@@ -312,7 +238,7 @@ Please output 3 distinct refactoring candidates according to Multi-Variant instr
 
         else:
             new_code = None
-            if not force_offline and self.is_api_configured():
+            if self.is_api_configured():
                 prompt = f"""Target File: {rel_file}
 Line Range: {finding.get('line_from')} to {finding.get('line_to')}
 Taxonomy Codes: {finding.get('pdf_taxonomy')}
@@ -327,10 +253,7 @@ Please rewrite the entire Java file with the optimal implementation."""
                     llm_response = self.call_llm(prompt)
                     new_code = self.extract_code_block(llm_response)
                 except Exception as e:
-                    self.logger.log("WARNING", f"LLM call failed ({e}). Falling back to offline refactoring engine.")
-                    new_code = self.fallback_refactor(finding, original_code)
-            else:
-                new_code = self.fallback_refactor(finding, original_code)
+                    self.logger.log("WARNING", f"LLM call failed ({e}).")
 
             if dry_run:
                 self.logger.log("INFO", f"[DRY RUN] Would write updated content to {rel_file}.")
@@ -380,7 +303,6 @@ def main():
     parser.add_argument("--model", help="LLM model name (e.g. deepseek-chat, gpt-4o)")
     parser.add_argument("--api-key", help="API key for LLM provider")
     parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint")
-    parser.add_argument("--offline", action="store_true", help="Force offline deterministic pattern refactoring")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
     parser.add_argument("--multi-variant", action="store_true", help="Generate all possible candidate variants for each bottleneck")
@@ -423,7 +345,6 @@ def main():
                 target_file=abs_file,
                 max_steps=args.max_steps,
                 findings=[finding],
-                offline=args.offline,
                 run_log_path=logger.log_path,
                 verify_mvn=not args.no_verify,
             )
@@ -440,7 +361,7 @@ def main():
             finding,
             root_dir=root_dir,
             dry_run=args.dry_run,
-            force_offline=args.offline,
+
             multi_variant=args.multi_variant,
             enable_jfr=args.enable_jfr
         )

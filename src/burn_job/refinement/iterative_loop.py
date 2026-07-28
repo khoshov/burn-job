@@ -6,7 +6,6 @@ import argparse
 import datetime
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -49,37 +48,6 @@ def verify_compilation(file_path: str, repo_root: str = REPO_ROOT) -> bool:
         return False
 
 
-def offline_refactor_step(code: str, taxonomy_findings: list) -> str:
-    result = code
-    for finding in taxonomy_findings:
-        anomaly_type = finding.get("type", "")
-        if anomaly_type == "SAVE_IN_LOOP_UNBATCHED":
-            result = re.sub(
-                r'employeeRepository\.save\((\w+)\);',
-                r'employeesToSave.add(\1);\n    }  // end loop\n    employeeRepository.saveAll(employeesToSave);',
-                result
-            )
-        elif anomaly_type == "N_PLUS_ONE_QUERIES":
-            result = re.sub(
-                r'(List\s*<[^>]*>\s*\w+\s*=\s*\w+Repository\.findAll\s*\()',
-                r'\1/* JOIN FETCH */',
-                result
-            )
-        elif anomaly_type == "EXCESSIVE_STRING_CONCAT":
-            result = re.sub(
-                r'(\w+\s*\+=\s*["\'][^"\']*["\'])',
-                r'sb.append(\1.split("+=")[1].strip())',
-                result
-            )
-        elif anomaly_type == "LINEAR_SEARCH_IN_LOOP":
-            result = re.sub(
-                r'\.contains\(([^)]+)\)',
-                r'.contains(\1) /* convert to HashSet for O(1) */',
-                result
-            )
-    return result
-
-
 def score_candidate(code: str, complexity_res: dict) -> float:
     score = 100.0
     nesting = complexity_res.get("max_nesting_depth", 0)
@@ -102,7 +70,7 @@ def score_candidate(code: str, complexity_res: dict) -> float:
 
 
 def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = None,
-                       offline: bool = False, run_log_path: str = None, verify_mvn: bool = True) -> dict:
+                       run_log_path: str = None, verify_mvn: bool = True) -> dict:
     logger = _SimpleLogger(run_log_path) if run_log_path else None
 
     if not os.path.exists(target_file):
@@ -123,17 +91,13 @@ def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = No
         else:
             complexity_result = analyze_complexity(original_code)
 
-        if offline:
-            new_code = offline_refactor_step(current_code, findings or [])
-            step_entry["action"] = "offline_refactor"
-        else:
-            prompt = render_prompt("generator_prompt.jinja2", {
-                "code": current_code,
-                "findings": findings or [],
-                "complexity_analysis": complexity_result,
-                "evaluator_feedback": step_log[-1].get("evaluator_feedback", "") if step_log else "",
-            })
-            new_code = prompt
+        prompt = render_prompt("generator_prompt.jinja2", {
+            "code": current_code,
+            "findings": findings or [],
+            "complexity_analysis": complexity_result,
+            "evaluator_feedback": step_log[-1].get("evaluator_feedback", "") if step_log else "",
+        })
+        new_code = prompt
 
         if not new_code or len(new_code.strip()) < 10:
             step_entry["result"] = "generated_code_too_short"
@@ -198,7 +162,6 @@ def main():
     parser.add_argument("--file", required=True, help="Target Java source file")
     parser.add_argument("--max-steps", type=int, default=3)
     parser.add_argument("--findings", help="Path to findings JSON")
-    parser.add_argument("--offline", action="store_true")
     parser.add_argument("--no-verify", action="store_true", dest="no_verify")
     parser.add_argument("--run-log", help="Path to run log file")
     args = parser.parse_args()
@@ -212,7 +175,6 @@ def main():
         target_file=args.file,
         max_steps=args.max_steps,
         findings=findings_list,
-        offline=args.offline,
         run_log_path=args.run_log,
         verify_mvn=not args.no_verify,
     )
