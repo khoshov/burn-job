@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  burn-job:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: burn-job-pipeline
+    volumes:
+      - .:/app
+    environment:
+      - BURN_JOB_HOST=http://host.docker.internal:8080
+      - BURN_JOB_BACKEND=auto
+    command: ["run-cycle"]

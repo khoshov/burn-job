@@ -37,6 +37,17 @@ make run
 ./run.sh run-cycle --backend vllm --model-path Qwen3-4B
 ```
 
+### 🐳 Запуск через Docker / Docker Compose:
+
+```bash
+# Через Docker Compose:
+docker compose up
+
+# Сборка и запуск через Docker:
+docker build -t burn-job .
+docker run --rm -v $(pwd):/app burn-job run-cycle
+```
+
 ---
 
 ## Содержание
