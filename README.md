@@ -8,29 +8,33 @@
 
 ## 🚀 Быстрый запуск (Quick Start)
 
-Максимально простой запуск автономного цикла оптимизации из корня проекта:
+**Самый простой способ (1 команда из корня проекта):**
+Скрипт `./run.sh` автоматически создаст виртуальное окружение, установит все зависимости и запустит полный цикл оптимизации:
 
 ```bash
-# 1. Установите зависимости в виртуальное окружение
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+# Одной командой из корня проекта:
+./run.sh
 
-# 2. Запустите полный автономный цикл из корня проекта
-burn-job run-cycle
+# Или через make:
+make run
+```
 
-# Или запуск через модуль Python (без установки CLI):
-python3 -m burn_job.cli run-cycle
+---
 
-# (Опционально) Запуск с локальной моделью Qwen3 через llama.cpp:
-burn-job run-cycle --backend llama.cpp --model-path Qwen3-4B/qwen3-4b-instruct.gguf
+### Примеры команд запуска из корня:
 
-# (Опционально) Альтернативный запуск через vLLM (высокая пропускная способность):
-burn-job run-cycle --backend vllm --model-path "Qwen3-4B"
+```bash
+# Запуск полного автономного цикла:
+./run.sh run-cycle
 
-# (Опционально) Запуск через внешний/локальный vLLM OpenAI API сервер:
-burn-job run-cycle --online --base-url "http://localhost:8000/v1"
+# Сканирование эндпоинтов:
+./run.sh scan
+
+# Запуск с локальной моделью Qwen3 через llama.cpp:
+./run.sh run-cycle --backend llama.cpp --model-path Qwen3-4B/qwen3-4b-instruct.gguf
+
+# Альтернативный запуск через vLLM engine:
+./run.sh run-cycle --backend vllm --model-path Qwen3-4B
 ```
 
 ---
