@@ -65,6 +65,29 @@ def analyze_t8(conn) -> list:
                 "description": f"Excessive string allocation/concatenation in '{caller}' ({count} samples). High GC allocation pressure."
             })
 
+    # 3. Contract-bounded request collection (ND-4)
+    query_bounded_request = """
+        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        WHERE a.methodName CONTAINS 'processBoundedPage' OR a.methodName CONTAINS 'BoundedPage'
+        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
+        ORDER BY r.count DESC
+    """
+    res = conn.execute(query_bounded_request)
+    while res.has_next():
+        caller, callee, count, pct = res.get_next()
+        anomalies.append({
+            "taxonomy_id": "T8",
+            "category": "MEMORY_BLOAT",
+            "type": "BOUNDED_REQUEST_COLLECTION",
+            "severity": "LOW",
+            "caller": caller,
+            "callee": callee,
+            "sample_count": count,
+            "percentage": pct,
+            "description": f"Request page collection bounded by API contract in '{caller}' -> '{callee}' ({count} samples)."
+        })
+
+
     return anomalies
 
 

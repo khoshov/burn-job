@@ -66,6 +66,29 @@ def analyze_t9(conn) -> list:
             "description": f"Hotspot method '{method}' consumed {count} CPU samples. Optimize heavy loop logic or caching."
         })
 
+    # 3. Microbenchmark noise regex compilation
+    query_regex_compile = """
+        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        WHERE b.className CONTAINS 'Pattern' OR b.methodName CONTAINS 'compile'
+        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
+        ORDER BY r.count DESC
+    """
+    res = conn.execute(query_regex_compile)
+    while res.has_next():
+        caller, callee, count, pct = res.get_next()
+        anomalies.append({
+            "taxonomy_id": "T9",
+            "category": "CPU_LOAD",
+            "type": "MICROBENCHMARK_REGEX_COMPILE",
+            "severity": "LOW",
+            "caller": caller,
+            "callee": callee,
+            "sample_count": count,
+            "percentage": pct,
+            "description": f"Microbenchmark noise pattern.compile in '{caller}' -> '{callee}' ({count} samples)."
+        })
+
+
     return anomalies
 
 
