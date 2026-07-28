@@ -757,3 +757,51 @@
 [2026-07-28T18:10:03.170952] [INFO] Executing Maven verification (mvn test-compile)...
 [2026-07-28T18:10:04.731006] [SUCCESS] Maven test-compile PASSED cleanly.
 [2026-07-28T18:10:04.731365] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===
+[2026-07-28T21:35:25.729745] [INFO] === STARTING LLM CODE REFACTORING & JFR EVALUATION AGENT ===
+[2026-07-28T21:35:25.731014] [INFO] Loaded 4 findings from report.
+[2026-07-28T21:35:25.731055] [INFO] Mode: SysLLMatic Iterative Self-Optimization Loop Enabled (max_steps=2).
+[2026-07-28T21:35:26.242791] [INFO] [IterativeLoop] Starting SysLLMatic iterative self-optimization on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java (max_steps=2)
+[2026-07-28T21:35:26.244381] [INFO] [IterativeLoop] Baseline code score: 100.0 (complexity: O(1), nesting: 0, issues: 0)
+[2026-07-28T21:35:26.244470] [INFO] [IterativeLoop] --- Iteration 1/2 ---
+[2026-07-28T21:35:26.245613] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 1
+[2026-07-28T21:35:26.246685] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.248112] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 1 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.248188] [INFO] [IterativeLoop] --- Iteration 2/2 ---
+[2026-07-28T21:35:26.249262] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 2
+[2026-07-28T21:35:26.250331] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.250391] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 2 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.250635] [INFO] [IterativeLoop] Completed SysLLMatic iterative loop on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/NPlusOneService.java. Final best score: 100.0
+[2026-07-28T21:35:26.250681] [INFO] [IterativeLoop] Starting SysLLMatic iterative self-optimization on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (max_steps=2)
+[2026-07-28T21:35:26.251742] [INFO] [IterativeLoop] Baseline code score: 100.0 (complexity: O(1), nesting: 0, issues: 0)
+[2026-07-28T21:35:26.251776] [INFO] [IterativeLoop] --- Iteration 1/2 ---
+[2026-07-28T21:35:26.252731] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 1
+[2026-07-28T21:35:26.254241] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.254354] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 1 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.254387] [INFO] [IterativeLoop] --- Iteration 2/2 ---
+[2026-07-28T21:35:26.255680] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 2
+[2026-07-28T21:35:26.256922] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.256987] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 2 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.257327] [INFO] [IterativeLoop] Completed SysLLMatic iterative loop on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/InMemoryFilterService.java. Final best score: 100.0
+[2026-07-28T21:35:26.257368] [INFO] [IterativeLoop] Starting SysLLMatic iterative self-optimization on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java (max_steps=2)
+[2026-07-28T21:35:26.260290] [INFO] [IterativeLoop] Baseline code score: 55.0 (complexity: O(N), nesting: 1, issues: 3)
+[2026-07-28T21:35:26.260344] [INFO] [IterativeLoop] --- Iteration 1/2 ---
+[2026-07-28T21:35:26.262313] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 1
+[2026-07-28T21:35:26.264169] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 55.0 (complexity: O(N), issues: 3)
+[2026-07-28T21:35:26.264237] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 1 reduced nesting depth to 1. Suggestions remaining: String concatenation inside loop. Use StringBuilder instead of string addition to avoid repeated array allocations.
+[2026-07-28T21:35:26.264271] [INFO] [IterativeLoop] --- Iteration 2/2 ---
+[2026-07-28T21:35:26.266126] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 2
+[2026-07-28T21:35:26.267936] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 55.0 (complexity: O(N), issues: 3)
+[2026-07-28T21:35:26.267996] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 2 reduced nesting depth to 1. Suggestions remaining: String concatenation inside loop. Use StringBuilder instead of string addition to avoid repeated array allocations.
+[2026-07-28T21:35:26.268265] [INFO] [IterativeLoop] Completed SysLLMatic iterative loop on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/SaveInLoopService.java. Final best score: 55.0
+[2026-07-28T21:35:26.268307] [INFO] [IterativeLoop] Starting SysLLMatic iterative self-optimization on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (max_steps=2)
+[2026-07-28T21:35:26.269119] [INFO] [IterativeLoop] Baseline code score: 100.0 (complexity: O(1), nesting: 0, issues: 0)
+[2026-07-28T21:35:26.269271] [INFO] [IterativeLoop] --- Iteration 1/2 ---
+[2026-07-28T21:35:26.269969] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 1
+[2026-07-28T21:35:26.270637] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.270689] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 1 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.270721] [INFO] [IterativeLoop] --- Iteration 2/2 ---
+[2026-07-28T21:35:26.271385] [INFO] [IterativeLoop] [Generator] Applied offline deterministic refactoring step 2
+[2026-07-28T21:35:26.272034] [INFO] [IterativeLoop] [Verifier] SUCCESS. Candidate score: 100.0 (complexity: O(1), issues: 0)
+[2026-07-28T21:35:26.272080] [INFO] [IterativeLoop] [Evaluator] Feedback generated: Step 2 reduced nesting depth to 0. Suggestions remaining: None
+[2026-07-28T21:35:26.272359] [INFO] [IterativeLoop] Completed SysLLMatic iterative loop on /Users/stanislavkhoshov/Documents/burn-job/src/main/java/com/example/badhibernate/service/FullEntityFetchService.java. Final best score: 100.0
+[2026-07-28T21:35:26.272400] [INFO] Iterative refactoring complete. 4/4 target files optimized.

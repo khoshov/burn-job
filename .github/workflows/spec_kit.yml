@@ -1,0 +1,28 @@
+name: GitHub Spec Kit SDD Validation
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-specs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate SDD Specifications (GitHub Spec Kit)
+        run: |
+          python3 skill/scripts/spec_kit.py validate
+
+      - name: Display SDD Specifications Progress Index
+        run: |
+          python3 skill/scripts/spec_kit.py list

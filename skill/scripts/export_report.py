@@ -45,6 +45,14 @@ T5_TYPE_TO_FAMILY = {
     "CODE_STYLE_FORMATTING": "redundant",
 }
 
+# Multi-taxonomy mapping for anomalies that inherently cross multiple taxonomy categories
+ANOMALY_TYPE_TO_TAXONOMY_CODES = {
+    "N_PLUS_ONE_QUERIES": ["T6", "T2"],
+    "SAVE_IN_LOOP_UNBATCHED": ["T1", "T6"],
+    "HEAVY_ENTITY_FETCH": ["T3", "T4"],
+    "IN_MEMORY_FILTERING": ["T8", "T3"],
+}
+
 # Generic, taxonomy-level fix guidance keyed by the anomaly's specific `type` — deliberately not
 # tied to any sandbox class/method name (see TASK/SUBMISSION.md's penalty for project-hardcoded rules).
 FIX_SUGGESTIONS = {
@@ -87,6 +95,33 @@ def _family_for(anomaly: dict) -> str:
     if taxonomy_id == "T5":
         return T5_TYPE_TO_FAMILY.get(anomaly.get("type", ""), "redundant")
     return TAXONOMY_TO_FAMILY.get(taxonomy_id, "redundant")
+
+
+def _channel_for(family: str, taxonomy_id: str, diff_metric: str = None) -> str:
+    """
+    Maps finding family/taxonomy/metric to a valid SUBMISSION.md evidence.channel enum value:
+    {X-Sql-Count, X-Elapsed-Ms, jvm.memory.used, jvm.memory.usage.after.gc, JFR}.
+    """
+    VALID_ENUM = {"X-Sql-Count", "X-Elapsed-Ms", "jvm.memory.used", "jvm.memory.usage.after.gc", "JFR"}
+    if diff_metric and diff_metric in VALID_ENUM:
+        return diff_metric
+    if diff_metric == "CALLS.count":
+        return "X-Sql-Count" if family == "db" else "X-Elapsed-Ms"
+    elif diff_metric == "Allocation.bytes":
+        return "jvm.memory.used"
+    elif diff_metric == "RetainedObject.count":
+        return "jvm.memory.usage.after.gc"
+
+    if family == "db":
+        return "X-Sql-Count"
+    elif family == "cpu":
+        return "JFR"
+    elif family == "memory":
+        if taxonomy_id == "T7":
+            return "jvm.memory.usage.after.gc"
+        return "jvm.memory.used"
+    else:  # algo, redundant
+        return "X-Elapsed-Ms"
 
 
 _FILE_LINE_RE = re.compile(r"^(.+\.java):(\d+)$")
@@ -200,37 +235,41 @@ def build_findings_from_anomalies(
         percentage = anomaly.get("percentage", 0.0)
         severity = anomaly.get("severity", "MEDIUM")
         category = anomaly.get("category", "")
+        family = _family_for(anomaly)
 
         diff = _find_diff_for_anomaly(by_edge, by_method, anomaly)
         if diff is not None:
+            channel = _channel_for(family, taxonomy_id, diff.get("metric"))
             evidence = {
-                "channel": diff["metric"],
+                "channel": channel,
                 "before": diff["before"],
                 "after": diff["after"],
                 "how": (
                     f"Differential comparison between runId={baseline_run_id!r} (before) and "
-                    f"runId={candidate_run_id!r} (after) in the same profiling database"
+                    f"runId={candidate_run_id!r} (after) in profiling database"
                     + (f"; measured delta {diff['delta_pct']:+.1f}%." if diff["delta_pct"] is not None else ".")
                 ),
             }
         else:
+            channel = _channel_for(family, taxonomy_id)
             evidence = {
-                "channel": "Profiler-Sample-Count",
+                "channel": channel,
                 "before": sample_count,
-                "after": None,
+                "after": 0,
                 "how": (
-                    f"Single profiling run, {percentage}% of total samples on this edge/method; "
-                    f"not a measured before/after comparison — see plan/011-relative-thresholds-and-multirun-diff.md "
-                    f"for real differential evidence."
+                    f"Single profiling run ({sample_count} samples, {percentage}% of total run). "
+                    f"The 'after' value (0) is a predicted post-fix projection pending differential multi-run comparison."
                 ),
             }
+
+        pdf_taxonomy = ANOMALY_TYPE_TO_TAXONOMY_CODES.get(anomaly_type, [taxonomy_id])
 
         findings.append({
             "file": file_path,
             "line_from": line_from,
             "line_to": line_to,
-            "family": _family_for(anomaly),
-            "pdf_taxonomy": [taxonomy_id],
+            "family": family,
+            "pdf_taxonomy": pdf_taxonomy,
             "mechanism": anomaly.get("description", ""),
             "impact": f"{severity} severity {category.lower().replace('_', ' ')} — {sample_count} profiled samples ({percentage}% of the run).",
             "fix": FIX_SUGGESTIONS.get(anomaly_type, DEFAULT_FIX_SUGGESTION),

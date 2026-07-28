@@ -7,3 +7,7 @@ target/
 *.class
 __pycache__/
 *.pyc
+dist/
+.specify/
+.gemini/
+

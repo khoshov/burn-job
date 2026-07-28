@@ -402,6 +402,8 @@ def main():
     parser.add_argument("--multi-variant", action="store_true", help="Generate all possible candidate variants (T1-T9) for each bottleneck")
     parser.add_argument("--enable-jfr", action="store_true", help="Capture JFR profiles across candidate variants and select winner by performance score")
     parser.add_argument("--benchmark-all-variants", action="store_true", help="Run multi-variant feature toggle benchmarking suite to select winner")
+    parser.add_argument("--iterative", action="store_true", help="Enable SysLLMatic iterative self-optimization loop (Generator -> Verifier -> Evaluator Feedback)")
+    parser.add_argument("--max-steps", type=int, default=3, help="Maximum number of self-optimization iterations in --iterative mode (default: 3)")
     args = parser.parse_args()
 
     root_dir = os.path.abspath(args.src_dir)
@@ -426,6 +428,30 @@ def main():
         findings = load_findings(report_path)
 
     logger.log("INFO", f"Loaded {len(findings)} findings from report.")
+
+    if args.iterative:
+        logger.log("INFO", f"Mode: SysLLMatic Iterative Self-Optimization Loop Enabled (max_steps={args.max_steps}).")
+        from iterative_agent_loop import run_iterative_loop
+        modified_count = 0
+        for finding in findings:
+            rel_file = finding.get("file")
+            if not rel_file:
+                continue
+            abs_file = os.path.join(root_dir, rel_file)
+            if not os.path.exists(abs_file):
+                continue
+            res = run_iterative_loop(
+                target_file=abs_file,
+                max_steps=args.max_steps,
+                findings=[finding],
+                offline=args.offline,
+                run_log_path=logger.log_path,
+                verify_mvn=not args.no_verify,
+            )
+            if res.get("success"):
+                modified_count += 1
+        logger.log("INFO", f"Iterative refactoring complete. {modified_count}/{len(findings)} target files optimized.")
+        sys.exit(0)
 
     agent = LLMAgent(model=args.model, api_key=args.api_key, base_url=args.base_url, logger=logger)
     modified_count = 0
