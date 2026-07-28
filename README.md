@@ -264,7 +264,9 @@ pytest tests/ -v
 | `BURN_JOB_CONCURRENCY` | `50` | Конкурентность нагрузочного теста |
 | `BURN_JOB_DURATION_SEC` | `5` | Длительность нагрузочного теста (сек) |
 | `BURN_JOB_MAX_ITERATIONS` | `3` | Макс. итераций LLM-рефакторинга |
-| `BURN_JOB_MODEL` | `deepseek-coder` | Модель LLM для генерации кода |
+| `BURN_JOB_MODEL` | `qwen3` | Модель LLM для генерации кода |
+| `BURN_JOB_BACKEND` | `auto` | Движок LLM: `auto`, `llama.cpp`, `vllm`, `openai` |
+| `BURN_JOB_MODEL_PATH` | `./Qwen3-4B` | Путь к локальной модели / GGUF файлу |
 
 ### Структура файлов конфигурации
 
@@ -715,23 +717,37 @@ SAVE_IN_LOOP_UNBATCHED, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP, HEAVY_EN
 3. **Извлечение кода** (`extract_code_block()`): из ответа LLM парсится блок ` ``` `java ... ` ``` `` `
 
 
-Провайдеры: DeepSeek (по умолчанию), OpenAI, любой OpenAI-compatible endpoint.
+#### Поддерживаемые движки и провайдеры (LLM Backends)
 
-**Настройка LLM:**
+Система поддерживает 3 варианта запуска агента рефакторинга (`--backend`):
 
-```bash
-# DeepSeek (по умолчанию)
-export DEEPSEEK_API_KEY=sk-...
-export LLM_MODEL=deepseek-chat
+1. **`llama.cpp` (Локальный инференс GGUF-моделей)**:
+   - Использует `llama-cpp-python` с аппаратным ускорением GPU (Apple Silicon Metal / CUDA).
+   - Запускается локально без передачи данных во внешние сервисы.
+   - Запуск: `burn-job run-cycle --backend llama.cpp --model-path Qwen3-4B/qwen3-4b-instruct.gguf`
 
-# OpenAI
-export OPENAI_API_KEY=sk-...
-export OPENAI_MODEL=gpt-4o
+2. **`vLLM` (Высокопроизводительный локальный/серверный инференс)**:
+   - Прямая интеграция с Python-движком `vLLM` (`from vllm import LLM`) или вызов внешнего сервера `vllm serve`.
+   - Подходит для локального запуска на серверных GPU или интеграции с инференс-кластерами.
+   - Запуск прямого Python vLLM engine: `burn-job run-cycle --backend vllm --model-path "Qwen3-4B"`
+   - Запуск через vLLM OpenAI-сервер: `burn-job run-cycle --online --base-url "http://localhost:8000/v1"`
 
-# Кастомный endpoint
-export LLM_API_KEY=...
-export DEEPSEEK_BASE_URL=https://your-endpoint/v1
-```
+3. **`openai` / `remote` (Удаленный REST API)**:
+   - DeepSeek, OpenAI, GigaChat или любой другой OpenAI-совместимый endpoint.
+   - Настройка через переменные окружения:
+     ```bash
+     # DeepSeek API
+     export DEEPSEEK_API_KEY=sk-...
+     export LLM_MODEL=deepseek-chat
+
+     # OpenAI API
+     export OPENAI_API_KEY=sk-...
+     export OPENAI_MODEL=gpt-4o
+
+     # Кастомный OpenAI-совместимый endpoint
+     export LLM_API_KEY=...
+     export DEEPSEEK_BASE_URL=https://your-endpoint/v1
+     ```
 
 ##### Multi-Variant режим (--multi-variant / --enable-jfr)
 
