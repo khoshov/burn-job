@@ -24,7 +24,13 @@ burn-job run-cycle
 python3 -m burn_job.cli run-cycle
 
 # (Опционально) Запуск с локальной моделью Qwen3 через llama.cpp:
-burn-job run-cycle --model-path Qwen3-4B/qwen3-4b-instruct.gguf
+burn-job run-cycle --backend llama.cpp --model-path Qwen3-4B/qwen3-4b-instruct.gguf
+
+# (Опционально) Альтернативный запуск через vLLM (высокая пропускная способность):
+burn-job run-cycle --backend vllm --model-path "Qwen3-4B"
+
+# (Опционально) Запуск через внешний/локальный vLLM OpenAI API сервер:
+burn-job run-cycle --online --base-url "http://localhost:8000/v1"
 ```
 
 ---

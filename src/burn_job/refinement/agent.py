@@ -99,50 +99,84 @@ class LLMAgent:
         api_key: str = None,
         base_url: str = None,
         model_path: str = None,
+        backend: str = None,
         n_ctx: int = 8192,
         n_gpu_layers: int = -1,
         logger: LLMAgentLogger = None,
     ):
         self.logger = logger or LLMAgentLogger()
+        self.backend = (backend or os.getenv("BURN_JOB_BACKEND") or "auto").lower()
         self.model_path = (
             model_path
             or os.getenv("BURN_JOB_MODEL_PATH")
             or os.getenv("LLAMA_CPP_MODEL_PATH")
+            or os.getenv("VLLM_MODEL_PATH")
             or os.getenv("GGUF_MODEL_PATH")
         )
 
-        if not self.model_path:
-            self.model_path = find_default_model_path()
-
         self.llama_model = None
-        if self.model_path and os.path.exists(self.model_path):
-            self.logger.log("INFO", f"Initializing local llama.cpp engine with model: {self.model_path}")
-            try:
-                from llama_cpp import Llama
-                self.llama_model = Llama(
-                    model_path=self.model_path,
-                    n_ctx=n_ctx,
-                    n_gpu_layers=n_gpu_layers,
-                    verbose=False,
-                )
-                self.logger.log("SUCCESS", f"Local llama.cpp engine initialized (model={os.path.basename(self.model_path)}).")
-            except ImportError:
-                self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
-            except Exception as e:
-                self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
+        self.vllm_engine = None
+
+        # Check vLLM backend direct load
+        if self.backend in ("vllm", "auto") and not self.llama_model:
+            vllm_target = self.model_path or (REPO_ROOT if os.path.exists(os.path.join(REPO_ROOT, "Qwen3-4B ", "config.json")) else None)
+            if vllm_target or self.backend == "vllm":
+                try:
+                    from vllm import LLM, SamplingParams
+                    target = vllm_target or "Qwen/Qwen2.5-Coder-7B-Instruct"
+                    self.logger.log("INFO", f"Initializing local vLLM engine with model/dir: {target}")
+                    self.vllm_engine = LLM(model=target, trust_remote_code=True)
+                    self.vllm_sampling_params = SamplingParams(temperature=0.2, max_tokens=4096)
+                    self.logger.log("SUCCESS", "Local vLLM engine initialized successfully.")
+                except ImportError:
+                    if self.backend == "vllm":
+                        self.logger.log("WARNING", "vllm package not installed. Install via `pip install vllm`.")
+                except Exception as e:
+                    self.logger.log("ERROR", f"Failed to initialize vLLM engine: {str(e)}")
+
+        # Check llama.cpp backend load
+        if self.backend in ("llama.cpp", "auto") and not self.vllm_engine:
+            if not self.model_path:
+                self.model_path = find_default_model_path()
+
+            if self.model_path and os.path.exists(self.model_path):
+                self.logger.log("INFO", f"Initializing local llama.cpp engine with model: {self.model_path}")
+                try:
+                    from llama_cpp import Llama
+                    self.llama_model = Llama(
+                        model_path=self.model_path,
+                        n_ctx=n_ctx,
+                        n_gpu_layers=n_gpu_layers,
+                        verbose=False,
+                    )
+                    self.logger.log("SUCCESS", f"Local llama.cpp engine initialized (model={os.path.basename(self.model_path)}).")
+                except ImportError:
+                    if self.backend == "llama.cpp":
+                        self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
+                except Exception as e:
+                    self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
 
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
-
         default_base_url = "https://api.deepseek.com/v1" if (self.api_key and "deepseek" in (base_url or "").lower()) or os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
-        self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
+        self.base_url = (base_url or os.getenv("VLLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
 
-        default_model = "qwen3" if self.llama_model else ("deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o")
+        default_model = "qwen3" if (self.llama_model or self.vllm_engine) else ("deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o")
         self.model = model or os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or default_model
 
     def is_api_configured(self) -> bool:
-        return (self.llama_model is not None) or bool(self.api_key)
+        return (self.vllm_engine is not None) or (self.llama_model is not None) or bool(self.api_key)
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
+        if self.vllm_engine is not None:
+            self.logger.log("INFO", "Executing inference via local python vLLM engine...")
+            try:
+                full_prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+                outputs = self.vllm_engine.generate([full_prompt], self.vllm_sampling_params)
+                return outputs[0].outputs[0].text
+            except Exception as e:
+                self.logger.log("ERROR", f"Local vLLM execution error: {str(e)}")
+                raise
+
         if self.llama_model is not None:
             self.logger.log("INFO", "Executing inference via local python llama.cpp (Qwen3)...")
             try:
@@ -160,7 +194,7 @@ class LLMAgent:
                 raise
 
         if not self.is_api_configured():
-            raise ValueError("LLM API Key or local llama.cpp model path not provided. Configure --model-path for local Qwen3 or set OPENAI_API_KEY.")
+            raise ValueError("LLM API Key or local model path (llama.cpp/vLLM) not provided. Configure --model-path or --backend vllm.")
 
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -369,11 +403,12 @@ def main():
     parser.add_argument("--report", default="reports/sandbox/findings.json", help="Path to findings JSON report")
     parser.add_argument("--src-dir", default=".", help="Root directory of the target project")
     parser.add_argument("--model", help="LLM model name (e.g. qwen3, deepseek-chat, gpt-4o)")
-    parser.add_argument("--model-path", help="Path to local GGUF model file for llama.cpp")
+    parser.add_argument("--model-path", help="Path to local model file/directory for llama.cpp or vLLM")
+    parser.add_argument("--backend", choices=["auto", "llama.cpp", "vllm", "openai"], default="auto", help="LLM execution backend (auto, llama.cpp, vllm, openai)")
     parser.add_argument("--n-ctx", type=int, default=8192, help="Context window size for local model")
     parser.add_argument("--n-gpu-layers", type=int, default=-1, help="Number of GPU layers to offload (-1 for all)")
     parser.add_argument("--api-key", help="API key for LLM provider")
-    parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint")
+    parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint (or vLLM server http://localhost:8000/v1)")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
     parser.add_argument("--multi-variant", action="store_true", help="Generate all possible candidate variants for each bottleneck")
@@ -406,6 +441,7 @@ def main():
         api_key=args.api_key,
         base_url=args.base_url,
         model_path=args.model_path,
+        backend=args.backend,
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
         logger=logger,

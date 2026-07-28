@@ -30,7 +30,8 @@ def main():
     cycle_p.add_argument("--profile", default=DEFAULT_PROFILE_PATH, help="Path to profile file")
     cycle_p.add_argument("--host", default=DEFAULT_HOST, help="Target API host")
     cycle_p.add_argument("--online", action="store_true", help="Enable online LLM API calls")
-    cycle_p.add_argument("--model-path", help="Path to local GGUF model file for llama.cpp")
+    cycle_p.add_argument("--model-path", help="Path to local model file/directory for llama.cpp or vLLM")
+    cycle_p.add_argument("--backend", choices=["auto", "llama.cpp", "vllm", "openai"], default="auto", help="LLM backend (auto, llama.cpp, vllm, openai)")
 
     version_p = subparsers.add_parser("version", help="Print CLI version")
 
@@ -62,6 +63,7 @@ def main():
             host=args.host,
             offline=not args.online,
             model_path=args.model_path,
+            backend=args.backend,
         )
         res = orchestrator.run()
         if res.get("success"):

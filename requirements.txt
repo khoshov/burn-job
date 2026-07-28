@@ -2,6 +2,7 @@
 kuzu
 jinja2
 llama-cpp-python
+# vllm  # Optional alternative high-throughput local backend (pip install vllm)
 
 # Testing dependencies
 pytest>=8.0

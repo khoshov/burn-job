@@ -36,6 +36,7 @@ class AutonomousOrchestrator:
         offline: bool = True,
         log_path: str = RUN_LOG_PATH,
         model_path: str = None,
+        backend: str = "auto",
     ):
         self.db_path = db_path
         self.profile_path = profile_path
@@ -44,9 +45,10 @@ class AutonomousOrchestrator:
         self.offline = offline
         self.log_path = log_path
         self.model_path = model_path
+        self.backend = backend
         self.graph_store = KuzuGraphStore(db_path)
         from burn_job.refinement.agent import LLMAgent
-        self.agent = LLMAgent(model_path=model_path) if not offline or model_path else None
+        self.agent = LLMAgent(model_path=model_path, backend=backend) if not offline or model_path or backend in ("vllm", "llama.cpp") else None
 
     def run(self) -> Dict[str, Any]:
         logger.info("==================================================================")

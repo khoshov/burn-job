@@ -47,11 +47,29 @@ def test_llm_agent_local_mock_inference():
     assert kwargs["messages"][1]["content"] == "Refactor this code"
 
 
+def test_llm_agent_vllm_mock_inference():
+    mock_vllm = MagicMock()
+    mock_output = MagicMock()
+    mock_output.outputs = [MagicMock(text="```java\npublic class VllmOptimizedService {}\n```")]
+    mock_vllm.generate.return_value = [mock_output]
+
+    agent = LLMAgent(model="qwen3", backend="vllm")
+    agent.vllm_engine = mock_vllm
+    agent.vllm_sampling_params = MagicMock()
+
+    assert agent.is_api_configured() is True
+    res = agent.call_llm("Refactor via vLLM")
+    assert "VllmOptimizedService" in res
+
+    mock_vllm.generate.assert_called_once()
+
+
 def test_llm_agent_unconfigured_error():
     agent = LLMAgent(model="qwen3")
     agent.llama_model = None
+    agent.vllm_engine = None
     agent.api_key = None
 
     assert agent.is_api_configured() is False
-    with pytest.raises(ValueError, match="LLM API Key or local llama.cpp model path not provided"):
+    with pytest.raises(ValueError, match="LLM API Key or local model path"):
         agent.call_llm("Test prompt")
