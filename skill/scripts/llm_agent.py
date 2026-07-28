@@ -275,6 +275,7 @@ def main():
     parser.add_argument("--offline", action="store_true", help="Force offline deterministic pattern refactoring")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
+    parser.add_argument("--benchmark-all-variants", action="store_true", help="Run multi-variant feature toggle benchmarking suite to select winner")
     args = parser.parse_args()
 
     root_dir = os.path.abspath(args.src_dir)
@@ -318,7 +319,14 @@ def main():
             logger.log("ERROR", "Maven build verification failed after refactoring.")
             sys.exit(1)
 
+    if args.benchmark_all_variants:
+        logger.log("INFO", "Running multi-variant benchmarking suite (FIX_VARIANTS.md feature toggle engine)...")
+        benchmark_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark_variants.py")
+        if os.path.exists(benchmark_script):
+            subprocess.run([sys.executable, benchmark_script, "--update-findings"], check=False)
+
     logger.log("INFO", "=== LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===")
 
 if __name__ == "__main__":
     main()
+

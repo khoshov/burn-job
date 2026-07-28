@@ -34,7 +34,12 @@ public class AntipatternController {
         this.fullEntityFetchService = fullEntityFetchService;
     }
 
-    // 1. N+1 SELECTS DEMO
+    // 1. N+1 SELECTS DEMO (Supports ?variant=v1|v2|v3|suboptimal)
+    @GetMapping("/n-plus-one")
+    public List<DepartmentDto> getNPlusOneByVariant(@RequestParam(required = false) String variant) {
+        return nPlusOneService.getDepartmentsByVariant(variant);
+    }
+
     @GetMapping("/n-plus-one/bad")
     public List<DepartmentDto> getNPlusOneSubOptimal() {
         return nPlusOneService.getDepartmentsSubOptimal();
@@ -45,7 +50,16 @@ public class AntipatternController {
         return nPlusOneService.getDepartmentsOptimal();
     }
 
-    // 2. IN-MEMORY FILTERING DEMO
+    // 2. IN-MEMORY FILTERING DEMO (Supports ?variant=v1|v2|v3|suboptimal)
+    @GetMapping("/in-memory-filter")
+    public List<OrderSummaryDto> getInMemoryFilterByVariant(
+            @RequestParam(defaultValue = "SHIPPED") String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String variant) {
+        return inMemoryFilterService.getOrdersByVariant(status, page, size, variant);
+    }
+
     @GetMapping("/in-memory-filter/bad")
     public List<OrderSummaryDto> getInMemoryFilterSubOptimal(
             @RequestParam(defaultValue = "SHIPPED") String status,
@@ -62,7 +76,19 @@ public class AntipatternController {
         return inMemoryFilterService.getOrdersByStatusOptimal(status, page, size);
     }
 
-    // 3. SAVE IN LOOP DEMO
+    // 3. SAVE IN LOOP DEMO (Supports ?variant=v1|v2|v3|suboptimal)
+    @PostMapping("/save-in-loop")
+    public Map<String, Object> runSaveInLoopVariant(
+            @RequestParam(defaultValue = "200") int count,
+            @RequestParam(required = false) String variant) {
+        long elapsedMs = saveInLoopService.createEmployeesByVariant(count, variant);
+        Map<String, Object> result = new HashMap<>();
+        result.put("itemCount", count);
+        result.put("variant", variant != null ? variant : "v1");
+        result.put("executionTimeMs", elapsedMs);
+        return result;
+    }
+
     @PostMapping("/save-in-loop/compare")
     public Map<String, Object> compareSaveInLoop(@RequestParam(defaultValue = "200") int count) {
         long badMs = saveInLoopService.createEmployeesSubOptimal(count);
@@ -76,7 +102,12 @@ public class AntipatternController {
         return result;
     }
 
-    // 4. FULL ENTITY FETCH VS PROJECTION DEMO
+    // 4. FULL ENTITY FETCH VS PROJECTION DEMO (Supports ?variant=v1|v2|suboptimal)
+    @GetMapping("/entity-fetch")
+    public List<EmployeeSimpleDto> getEntityFetchByVariant(@RequestParam(required = false) String variant) {
+        return fullEntityFetchService.getEmployeesByVariant(variant);
+    }
+
     @GetMapping("/entity-fetch/bad")
     public List<EmployeeSimpleDto> getFullEntitySubOptimal() {
         return fullEntityFetchService.getEmployeesSubOptimal();
@@ -87,3 +118,4 @@ public class AntipatternController {
         return fullEntityFetchService.getEmployeesOptimal();
     }
 }
+
