@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 T3. Неправильное использование функций (Improper Function / Entity Usage)
-Detects fetching full JPA entities / LOB payloads when only identifiers or DTO projections are required.
+Detects fetching full JPA entities / LOB payloads when only identifiers or DTO projections are
+required, and full fetches used only to check existence.
+
+Both rules now live in rules/graph_rules.yaml (spec 010). See
+static_pattern_detectors.detect_existence_check_full_fetch (spec 009) for the newer, structural
+(dataflow-based, not name-based) detector for the existence-check pattern specifically.
 """
 
 import sys
@@ -9,66 +14,21 @@ import os
 import argparse
 import json
 
+_SCRIPTS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 try:
     import kuzu
     HAS_KUZU = True
 except ImportError:
     HAS_KUZU = False
 
+import rule_engine  # noqa: E402
+
 
 def analyze_t3(conn) -> list:
-    anomalies = []
-
-    # 1. Heavy Entity Conversion & LOB AttributeConverters
-    query_lob_overhead = """
-        MATCH (m:Method)
-        WHERE m.className CONTAINS 'AttributeConverter' OR m.className CONTAINS 'Converter'
-           OR m.className CONTAINS 'TypeDescriptor' OR m.className CONTAINS 'PersistenceContext'
-        RETURN m.className + '.' + m.methodName AS method, m.sampleCount
-        ORDER BY m.sampleCount DESC
-    """
-    res = conn.execute(query_lob_overhead)
-    while res.has_next():
-        method, count = res.get_next()
-        if count > 50:
-            anomalies.append({
-                "taxonomy_id": "T3",
-                "category": "IMPROPER_FUNCTION_USAGE",
-                "type": "HEAVY_ENTITY_FETCH",
-                "severity": "MEDIUM",
-                "caller": "ORM Subsystem",
-                "callee": method,
-                "sample_count": count,
-                "percentage": 0.0,
-                "description": f"Heavy entity payload conversion detected in '{method}' ({count} samples). Full entity loaded into PersistenceContext when DTO/Interface Projection is sufficient."
-            })
-
-    # 2. Fetching full collection or entity just for exists / count check
-    query_full_fetch_for_check = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE (a.methodName CONTAINS 'exists' OR a.methodName CONTAINS 'check' OR a.methodName CONTAINS 'Count')
-          AND (b.methodName CONTAINS 'findAll' OR b.methodName CONTAINS 'getEmployees' OR b.methodName CONTAINS 'findUserById')
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-
-    res = conn.execute(query_full_fetch_for_check)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 10:
-            anomalies.append({
-                "taxonomy_id": "T3",
-                "category": "IMPROPER_FUNCTION_USAGE",
-                "type": "FULL_FETCH_FOR_EXISTENCE_CHECK",
-                "severity": "HIGH",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Method '{caller}' fetches full entity graph via '{callee}' to check existence or count ({count} samples). Replace with existsBy...() or COUNT query."
-            })
-
-    return anomalies
+    return rule_engine.run(conn, "T3")
 
 
 def main():

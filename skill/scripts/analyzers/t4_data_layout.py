@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 T4. Ошибки в раскладке данных (Data Layout & Object Overhead)
-Detects excessive object wrapper overhead (Integer / Long boxing), heavy primitive boxing in collections,
-and allocation pressure from suboptimal structures.
+Detects excessive object wrapper overhead via real allocation bytes (not CPU-sample-count proxy,
+see plan/005-allocation-based-t4-t8.md), plus a static (source-level) field-padding heuristic that
+requires no application run at all.
 """
 
 import sys
@@ -10,66 +11,84 @@ import os
 import argparse
 import json
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 try:
     import kuzu
     HAS_KUZU = True
 except ImportError:
     HAS_KUZU = False
 
+import rule_engine  # noqa: E402
+from object_layout import compute_layout_for_source_file  # noqa: E402
+from source_mapping import _class_index  # noqa: E402
+
+# Absolute byte thresholds for BOXED_WRAPPER_OVERHEAD (spec 005: T4 keeps an absolute threshold,
+# unlike T8's percentage-of-profile approach).
+_BOXED_OVERHEAD_MIN_BYTES = 10_000
+_BOXED_OVERHEAD_HIGH_BYTES = 100_000
+
 
 def analyze_t4(conn) -> list:
-    anomalies = []
+    # ARRAY_ALLOCATION_PRESSURE now lives in rules/graph_rules.yaml (spec 010).
+    anomalies = rule_engine.run(conn, "T4")
 
-    # 1. High Allocation Pressure on Primitive Wrappers & Map Nodes
+    # 1. High Allocation Pressure on Primitive Wrappers — real bytes from JFR allocation
+    # sampling (Allocation nodes, spec 002), not a count of Integer.valueOf/Long.valueOf calls.
     query_boxed_allocations = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE (b.className CONTAINS 'Integer' AND b.methodName = 'valueOf')
-           OR (b.className CONTAINS 'Long' AND b.methodName = 'valueOf')
-           OR (b.className CONTAINS 'HashMap$Node')
-           OR (b.className CONTAINS 'ArrayList' AND b.methodName = 'grow')
-           OR (b.className CONTAINS 'ClassLayout' OR b.methodName CONTAINS 'parseInstance')
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
+        MATCH (a:Allocation)-[:ALLOCATED_BY]->(m:Method)
+        WHERE a.className CONTAINS 'Integer' OR a.className CONTAINS 'Long'
+        RETURN m.className + '.' + m.methodName AS method, sum(a.bytes) AS totalBytes
+        ORDER BY totalBytes DESC
     """
     res = conn.execute(query_boxed_allocations)
     while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 5:
-            is_jol = "jol" in callee.lower() or "classlayout" in callee.lower()
+        method, total_bytes = res.get_next()
+        total_bytes = int(total_bytes) if total_bytes is not None else 0
+        if total_bytes > _BOXED_OVERHEAD_MIN_BYTES:
+            severity = "HIGH" if total_bytes > _BOXED_OVERHEAD_HIGH_BYTES else "MEDIUM"
             anomalies.append({
                 "taxonomy_id": "T4",
                 "category": "DATA_LAYOUT",
                 "type": "BOXED_WRAPPER_OVERHEAD",
-                "severity": "LOW" if is_jol else "MEDIUM",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Field order inspection JOL padding in '{caller}' -> '{callee}' ({count} samples)." if is_jol else f"High allocation overhead in '{caller}' creating boxed primitives ({count} samples)."
+                "severity": severity,
+                "caller": "Allocation Profiler",
+                "callee": method,
+                "sample_count": total_bytes,
+                "percentage": 0.0,
+                "description": f"'{method}' allocated {total_bytes} bytes of boxed Integer/Long wrapper objects in this run.",
             })
 
-
-    # 2. Heavy DTO / Entity memory layout allocations
-    query_heavy_layout = """
-        MATCH (m:Method)
-        WHERE m.className CONTAINS 'byte[]' OR m.className CONTAINS 'Object[]' OR m.className CONTAINS 'char[]'
-        RETURN m.className + '.' + m.methodName AS method, m.sampleCount
-        ORDER BY m.sampleCount DESC
-    """
-    res = conn.execute(query_heavy_layout)
-    while res.has_next():
-        method, count = res.get_next()
-        if count > 100:
+    # 2. WASTED_FIELD_PADDING — static heuristic over src/main/java, no application run required.
+    # See object_layout.py's module docstring for the ND-1 caveat this rule deliberately respects:
+    # this flags source declarations that are suboptimal *as written*, not a confirmed runtime cost.
+    for class_fqn, file_rel_path in _class_index().items():
+        simple_name = class_fqn.rsplit(".", 1)[-1]
+        abs_path = os.path.join(_SCRIPTS_ROOT, "..", "..", file_rel_path)
+        try:
+            layout = compute_layout_for_source_file(abs_path, simple_name)
+        except Exception:
+            continue
+        if layout["wasted_bytes"] > 0:
             anomalies.append({
                 "taxonomy_id": "T4",
                 "category": "DATA_LAYOUT",
-                "type": "ARRAY_ALLOCATION_PRESSURE",
-                "severity": "MEDIUM",
-                "caller": "JVM Garbage Collector",
-                "callee": method,
-                "sample_count": count,
+                "type": "WASTED_FIELD_PADDING",
+                "severity": "LOW",
+                "caller": "Static Field-Layout Analysis",
+                "callee": class_fqn,
+                "sample_count": layout["wasted_bytes"],
                 "percentage": 0.0,
-                "description": f"Massive array allocation footprint detected in '{method}' ({count} samples). Suboptimal buffer or string padding layout."
+                "description": (
+                    f"Class '{class_fqn}' declares fields in an order that heuristically wastes "
+                    f"~{layout['wasted_bytes']} bytes/instance vs. a size-descending order "
+                    f"{layout['optimal_order']} (static estimate — HotSpot may already reorder "
+                    f"fields at runtime; confirm with a real JOL measurement before treating this "
+                    f"as a confirmed defect, per non_defects.py ND-1)."
+                ),
             })
 
     return anomalies

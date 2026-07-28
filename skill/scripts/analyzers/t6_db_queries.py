@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 T6. Ошибки в запросах к базе данных (Database Query Errors)
-Detects N+1 query problems, lack of JDBC batching (saves in loops), and connection pool starvation (HikariPool).
+Detects N+1 query problems, lack of JDBC batching (saves in loops), and connection pool starvation.
+
+All three rules now live in rules/graph_rules.yaml (spec 010). SAVE_IN_LOOP_UNBATCHED's primary
+home moved here from t1_redundant_ops.py — it was byte-for-byte duplicated across both files
+(see plan/010's Problem section); it's now registered exactly once, tagged also_relevant_to: [T1].
+See static_pattern_detectors.detect_n_plus_one (spec 009) for the newer, structural (JPA-annotation
++ loop-shape based, not name-based) N+1 detector.
 """
 
 import sys
@@ -9,86 +15,21 @@ import os
 import argparse
 import json
 
+_SCRIPTS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 try:
     import kuzu
     HAS_KUZU = True
 except ImportError:
     HAS_KUZU = False
 
+import rule_engine  # noqa: E402
+
 
 def analyze_t6(conn) -> list:
-    anomalies = []
-
-    # 1. N+1 Queries Problem
-    query_n_plus_one = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE b.methodName CONTAINS 'findBy' OR b.methodName CONTAINS 'getEmployees' OR b.className CONTAINS 'PersistentBag'
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-    res = conn.execute(query_n_plus_one)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 50:
-            anomalies.append({
-                "taxonomy_id": "T6",
-                "category": "DATABASE_QUERIES",
-                "type": "N_PLUS_ONE_QUERIES",
-                "severity": "HIGH",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Method '{caller}' triggers lazy collection initialization or N+1 queries on '{callee}' ({count} samples). Requires JOIN FETCH."
-            })
-
-    # 2. Save In Loop / Lack of JDBC Batching
-    query_unbatched_saves = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE b.methodName CONTAINS 'performSave' OR b.methodName CONTAINS 'save' OR b.className CONTAINS 'AbstractSaveEventListener'
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-    res = conn.execute(query_unbatched_saves)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 50:
-            anomalies.append({
-                "taxonomy_id": "T6",
-                "category": "DATABASE_QUERIES",
-                "type": "SAVE_IN_LOOP_UNBATCHED",
-                "severity": "CRITICAL",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Method '{caller}' invokes individual entity save operations in loops ({count} samples). Missing JDBC batching."
-            })
-
-    # 3. Connection Pool Starvation
-    query_pool_starvation = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE b.className CONTAINS 'HikariPool' OR b.methodName CONTAINS 'getConnection'
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-    res = conn.execute(query_pool_starvation)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 30:
-            anomalies.append({
-                "taxonomy_id": "T6",
-                "category": "DATABASE_QUERIES",
-                "type": "CONNECTION_POOL_STARVATION",
-                "severity": "HIGH",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"High wait time acquiring JDBC connection in '{caller}' ({count} samples). HikariPool exhaustion risk."
-            })
-
-    return anomalies
+    return rule_engine.run(conn, "T6")
 
 
 def main():

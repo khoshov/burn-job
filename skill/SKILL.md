@@ -41,3 +41,13 @@ graph TD
    - Verifies all applied patches against `mvn test-compile` to ensure compilation safety.
 4. **Audit Log Persistence:**
    - Records step-by-step history to `runlog/agent_run.log`.
+
+---
+
+## 🔌 Qwen Code Integration
+
+This skill is also available as a native [Qwen Code](https://qwenlm.github.io/qwen-code-docs/)
+subagent — see `.qwen/agents/perf-findings-agent.md` (specs
+[013](../plan/013-qwen-subagent-report.md) / [014](../plan/014-qwen-subagent-fix-mode.md)). By
+default it produces a read-only report from `findings.json`; it only applies code fixes if
+explicitly asked.

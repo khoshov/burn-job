@@ -1,0 +1,187 @@
+# Data-driven definitions for the graph (CALLS-edge / single-Method) rules that fit a simple
+# match+threshold shape (plan/010-rule-config-externalization.md).
+#
+# NOT everything from analyzers/t*.py lives here — see the "Scope" note in rule_engine.py's module
+# docstring for the rules deliberately left as custom Python (T4/T7/T8/T9 rules rewritten by specs
+# 005-008 into aggregation/multi-hop/cross-run/static-graph queries that don't fit this schema, T2's
+# multi-hop nested-loop rule, T5 entirely, and the spec-009 static AST detectors per its non-goal).
+#
+# Schema per rule:
+#   id                  — the anomaly "type" value
+#   primary_taxonomy    — which analyze_tN() this rule executes under
+#   also_relevant_to    — other taxonomy ids this pattern is documented as relevant to (list; does
+#                         NOT duplicate execution — see plan/010's dedup goal)
+#   category, severity  — as in the anomaly dict (severity may be overridden per-match, see
+#                         severity_override below)
+#   node_type: Method    — single-node rule (MATCH (m:Method) WHERE ...); mutually exclusive with `edge`
+#   edge: CALLS          — two-node edge rule (MATCH (a:Method)-[r:CALLS]->(b:Method) WHERE ...)
+#   match                — AND-of-conditions; each *_contains/*_equals field is OR'd across its own
+#                          list of values. Use `any: [group, group, ...]` instead of flat fields for
+#                          OR-of-AND-groups (each group has the same shape as `match` itself).
+#   exclude              — same shape as match; matches where `exclude` holds are dropped
+#   threshold             — {field: count|percent|sampleCount, op: ">", value: N}; omit for "always emit"
+#   limit / order_by      — optional, for single-node "top N" rules
+#   caller_label / callee_label — fixed text for single-node rules (there's no real "caller")
+#   description_template — Python str.format() template; {caller} {callee} {count} {pct} available
+#   severity_override     — optional: {low_if_percent_lte: N, low_if_caller_contains: [str, ...]} —
+#                            the one case (LINEAR_SEARCH_IN_LOOP) needing per-match severity
+#
+# Thresholds are percent-of-total-run-samples, not absolute counts (spec 011) — an absolute
+# "count > 50" means something different on an 8-second profile vs. an 80-second one, so it either
+# misses real signal or drowns in noise depending on how long/how densely the run was sampled.
+# For edge (CALLS) rules, percent is the already-stored r.percent (computed at ingest from that
+# run's real total_samples). For single-node (Method) rules, rule_engine.py computes it as
+# sampleCount / sum(all Method.sampleCount) — Method nodes aren't run-scoped in the schema (only
+# CALLS/Allocation/RetainedObject/MonitorBlock carry runId), so this sum is only meaningful for a
+# database holding a single run; see rule_engine.py's docstring for that caveat.
+#
+# Values below were converted from the original absolute counts by dividing by 11216 (the largest
+# real profile captured this session, skill/scripts jfr_to_graph.py output on baseapp.collapsed) —
+# e.g. count>50 -> 50/11216 = 0.446% -> 0.4%, preserving roughly the same sensitivity on that
+# reference profile rather than picking round numbers arbitrarily.
+
+rules:
+  - id: SAVE_IN_LOOP_UNBATCHED
+    primary_taxonomy: T6
+    also_relevant_to: [T1]
+    category: DATABASE_QUERIES
+    severity: CRITICAL
+    edge: CALLS
+    match:
+      callee_method_contains: [performSave, save]
+      callee_class_contains: [AbstractSaveEventListener]
+    threshold: { field: percent, op: ">", value: 0.4 }
+    description_template: "Method '{caller}' invokes individual entity save operations in loops ({count} samples). Missing JDBC batching."
+
+  - id: EXCESSIVE_STRING_CONCAT
+    primary_taxonomy: T1
+    also_relevant_to: [T8]
+    category: REDUNDANT_OPERATIONS
+    severity: MEDIUM
+    edge: CALLS
+    match:
+      any:
+        - callee_class_contains: [StringBuilder]
+        - callee_class_contains: [String]
+          callee_method_contains: [concat]
+    threshold: { field: percent, op: ">", value: 0.4 }
+    description_template: "Method '{caller}' performs redundant string concatenation inside loops ({count} samples). High allocation overhead."
+
+  - id: LINEAR_SEARCH_IN_LOOP
+    primary_taxonomy: T2
+    category: INEFFICIENT_ALGORITHMS
+    severity: HIGH
+    edge: CALLS
+    match:
+      callee_class_contains: [List, ArrayList, LinkedList]
+      callee_method_equals: [contains, indexOf, remove, containsAll]
+    threshold: { field: percent, op: ">", value: 0.04 }
+    severity_override:
+      low_if_percent_lte: 0.12
+      low_if_caller_contains: [SmallMatch]
+    description_template: "Method '{caller}' performs linear search O(N) via '{callee}' ({count} samples)."
+
+  - id: HEAVY_ENTITY_FETCH
+    primary_taxonomy: T3
+    category: IMPROPER_FUNCTION_USAGE
+    severity: MEDIUM
+    node_type: Method
+    match:
+      class_contains: [AttributeConverter, Converter, TypeDescriptor, PersistenceContext]
+    threshold: { field: percent, op: ">", value: 0.4 }
+    caller_label: "ORM Subsystem"
+    description_template: "Heavy entity payload conversion detected in '{callee}' ({count} samples). Full entity loaded into PersistenceContext when DTO/Interface Projection is sufficient."
+
+  - id: FULL_FETCH_FOR_EXISTENCE_CHECK
+    primary_taxonomy: T3
+    category: IMPROPER_FUNCTION_USAGE
+    severity: HIGH
+    edge: CALLS
+    match:
+      caller_method_contains: [exists, check, Count]
+      callee_method_contains: [findAll, getEmployees, findUserById]
+    threshold: { field: percent, op: ">", value: 0.08 }
+    description_template: "Method '{caller}' fetches full entity graph via '{callee}' to check existence or count ({count} samples). Replace with existsBy...() or COUNT query."
+
+  - id: N_PLUS_ONE_QUERIES
+    primary_taxonomy: T6
+    category: DATABASE_QUERIES
+    severity: HIGH
+    edge: CALLS
+    match:
+      any:
+        - callee_method_contains: [findBy, getEmployees]
+        - callee_class_contains: [PersistentBag]
+    threshold: { field: percent, op: ">", value: 0.4 }
+    description_template: "Method '{caller}' triggers lazy collection initialization or N+1 queries on '{callee}' ({count} samples). Requires JOIN FETCH."
+
+  - id: CONNECTION_POOL_STARVATION
+    primary_taxonomy: T6
+    category: DATABASE_QUERIES
+    severity: HIGH
+    edge: CALLS
+    match:
+      any:
+        - callee_class_contains: [HikariPool]
+        - callee_method_contains: [getConnection]
+    threshold: { field: percent, op: ">", value: 0.25 }
+    description_template: "High wait time acquiring JDBC connection in '{caller}' ({count} samples). HikariPool exhaustion risk."
+
+  - id: ARRAY_ALLOCATION_PRESSURE
+    primary_taxonomy: T4
+    category: DATA_LAYOUT
+    severity: MEDIUM
+    node_type: Method
+    match:
+      class_contains: ["byte[]", "Object[]", "char[]"]
+    threshold: { field: percent, op: ">", value: 0.85 }
+    caller_label: "JVM Garbage Collector"
+    description_template: "Massive array allocation footprint detected in '{callee}' ({count} samples). Suboptimal buffer or string padding layout."
+
+  - id: UNBOUNDED_CACHE_OR_COLLECTION_GROWTH
+    primary_taxonomy: T7
+    category: MEMORY_LEAK
+    severity: LOW
+    edge: CALLS
+    match:
+      callee_class_contains: [Map, List, Cache, caffeine]
+      callee_method_contains: [put, add, get]
+    threshold: { field: percent, op: ">", value: 0.08 }
+    description_template: "Reference lookup in '{caller}' -> '{callee}' ({count} samples). Secondary signal — see RETAINED_OBJECT_ACCUMULATION/UNBOUNDED_GROWTH_TREND for direct evidence."
+
+  - id: BOUNDED_REQUEST_COLLECTION
+    primary_taxonomy: T8
+    category: MEMORY_BLOAT
+    severity: LOW
+    edge: CALLS
+    match:
+      caller_method_contains: [processBoundedPage, BoundedPage]
+    description_template: "Request page collection bounded by API contract in '{caller}' -> '{callee}' ({count} samples)."
+
+  - id: CPU_HOTSPOT_METHOD
+    primary_taxonomy: T9
+    category: CPU_LOAD
+    severity: MEDIUM
+    node_type: Method
+    match:
+      class_starts_with: [com.example, examples]
+    threshold: { field: percent, op: ">", value: 0.85 }
+    order_by: { field: sampleCount, direction: DESC }
+    limit: 10
+    caller_label: "Hot Execution Path"
+    description_template: "Hotspot method '{callee}' consumed {count} CPU samples. Optimize heavy loop logic or caching."
+
+  - id: MICROBENCHMARK_REGEX_COMPILE
+    primary_taxonomy: T9
+    category: CPU_LOAD
+    severity: LOW
+    edge: CALLS
+    match:
+      any:
+        - callee_class_contains: [Pattern]
+        - callee_method_contains: [compile]
+    exclude:
+      caller_class_equals: [Global]
+      callee_class_equals: [Global]
+    threshold: { field: percent, op: ">", value: 0.12 }
+    description_template: "Microbenchmark noise pattern.compile in '{caller}' -> '{callee}' ({count} samples)."
