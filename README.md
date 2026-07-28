@@ -455,6 +455,129 @@ RETURN a, b, r.count, r.count / totalSamples * 100 AS percent
   "description": "[Dual evidence: graph + static] Iterates repository result... (confirmed by profiling: 127 samples, 1.2%)"
 }
 ```
+---
+
+## 🔧 Варианты исправлений (Fix Variants)
+
+Для каждого типа дефекта система предлагает один или несколько вариантов исправления. Варианты делятся на **offline (regex-замены без LLM)** и **LLM-генерированные (через API)**. Подробнее о механизме выбора победителя см. в разделе "8-этапный цикл автономной оптимизации".
+
+### Таблица всех fix вариантов
+
+| Дефект (type) | T | Offline fix | LLM Variant 1 | LLM Variant 2 | LLM Variant 3 |
+|---|---|---|---|---|---|
+| N_PLUS_ONE_QUERIES | T6 | findAll -> findAllWithEmployees (regex) | JOIN FETCH JPQL | @EntityGraph | DTO Projection |
+| SAVE_IN_LOOP_UNBATCHED | T6 | save(emp) -> saveAll() (regex) | saveAll с JDBC batching | --- | --- |
+| FULL_FETCH_FOR_EXISTENCE_CHECK | T3 | findAll().isEmpty() -> existsBy (regex) | COUNT query repository.existsBy() | --- | --- |
+| HEAVY_ENTITY_FETCH | T3 | findAll() -> findAllProjectedBy() (regex) | Interface Projection | --- | --- |
+| IN_MEMORY_FILTERING | T8 | --- (только LLM/fallback) | PageRequest | Slice (без COUNT) | --- |
+| LINEAR_SEARCH_IN_LOOP | T2 | list.contains -> HashSet (regex comment) | Set lookup | HashMap index | --- |
+| QUADRATIC_NESTED_LOOP | T2 | --- | Precompute Map index | Sort + linear pass | --- |
+| EXCESSIVE_STRING_CONCAT | T1 | str += -> sb.append (regex) | StringBuilder | String.format | --- |
+| DUPLICATE_METHOD_BODY | T1 | --- (только детекция) | Extract method | Strategy pattern | --- |
+| DEAD_OR_UNREACHABLE_CODE | T5 | --- (только детекция) | Remove dead code | Add entry point | --- |
+| UNBOUNDED_CACHE_GROWTH | T7 | --- | LRU LinkedHashMap | Caffeine maxSize | --- |
+| RETAINED_OBJECT_ACCUMULATION | T7 | --- | WeakReference | Eviction policy | --- |
+| CONNECTION_POOL_STARVATION | T6 | --- | Increase pool size | Reduce hold time | --- |
+| CPU_HOTSPOT_METHOD | T9 | --- | Caching | Algorithmic change | Loop optimization |
+| MICROBENCHMARK_REGEX_COMPILE | T9 | --- | Static Pattern field | --- | --- |
+| EXCESSIVE_STRING_ALLOCATIONS | T8 | --- | StringBuilder reuse | Collectors.joining() | --- |
+| BOXED_WRAPPER_OVERHEAD | T4 | --- | Primitive collections (fastutil) | Primitive IntStream | --- |
+| ARRAY_ALLOCATION_PRESSURE | T4 | --- | Pre-size buffer | ThreadLocal pool | --- |
+| THREAD_LOCK_CONTENTION | T8 | --- | ReadWriteLock | ConcurrentHashMap/Atomic | --- |
+| DUPLICATE_LAYER_VALIDATION | T5 | --- | Consolidate validation | --- | --- |
+
+### Примеры offline regex-замен (без LLM)
+
+Эти замены применяются в `refinement/iterative_loop.py:offline_refactor_step()` когда LLM API недоступен:
+
+```python
+# SAVE_IN_LOOP_UNBATCHED: save() в цикле -> batch saveAll()
+re.sub(
+    r'employeeRepository\.save\((\w+)\);',
+    r'employeesToSave.add(\1);\n  }\n  employeeRepository.saveAll(employeesToSave);',
+    result
+)
+
+# N_PLUS_ONE_QUERIES: findAll() -> JOIN FETCH
+re.sub(
+    r'repository\.findAll\(',
+    r'repository.findAllWithEmployees/* JOIN FETCH */(',
+    result
+)
+
+# EXCESSIVE_STRING_CONCAT: конкатенация в цикле -> StringBuilder
+re.sub(
+    r'(\w+\s*\+=\s*["'][^"']*["'])',
+    r'sb.append(\1.split("+=")[1].strip())',
+    result
+)
+
+# LINEAR_SEARCH_IN_LOOP: list.contains() -> HashSet
+re.sub(
+    r'\.contains\(([^)]+)\)',
+    r'.contains(\1) /* convert to HashSet for O(1) */',
+    result
+)
+```
+
+### Примеры LLM-генерированных вариантов
+
+**N+1 Queries** -- три варианта исправления:
+
+```java
+// VARIANT 1: JOIN FETCH JPQL
+@Query("SELECT d FROM Department d JOIN FETCH d.employees")
+List<Department> findAllWithEmployees();
+
+// VARIANT 2: @EntityGraph
+@EntityGraph(attributePaths = "employees")
+@Query("SELECT d FROM Department d")
+List<Department> findAllEntityGraph();
+
+// VARIANT 3: DTO Projection
+public interface DepartmentSummary {
+    Long getId();
+    String getName();
+    List<EmployeeSummary> getEmployees();
+}
+public interface EmployeeSummary {
+    Long getId();
+    String getEmail();
+}
+```
+
+**In-Memory Filtering** -- два варианта:
+
+```java
+// VARIANT 1: PageRequest (полноценная пагинация с COUNT)
+return repository.findByStatusOptimal(status,
+    PageRequest.of(page, size)).getContent();
+
+// VARIANT 2: Slice (без COUNT запроса, только LIMIT+OFFSET)
+return repository.findSliceByStatus(status,
+    PageRequest.of(page, size)).getContent();
+```
+
+**Full Entity Fetch** -- проекция вместо полной сущности:
+
+```java
+// Вместо: List<Employee> employees = repository.findAll();
+// VARIANT 1: Interface Projection
+public interface EmployeeView {
+    Long getId();
+    String getFirstName();
+    String getLastName();
+    String getEmail();
+}
+List<EmployeeView> findAllProjectedBy();
+```
+
+### Процесс выбора варианта
+
+1. **Offline mode** (без API key): применяются regex-замены из `offline_refactor_step()`. Покрытие: SAVE_IN_LOOP_UNBATCHED, N_PLUS_ONE_QUERIES, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP.
+2. **Single LLM mode** (с API key): LLM генерирует один вариант, оптимальный под контекст. Использует `generator_prompt.jinja2` с findings, complexity-анализом и evaluator feedback.
+3. **Multi-Variant mode** (--multi-variant): LLM генерирует 3 варианта. Каждый проходит `mvn test-compile` и бенчмаркается. Выбирается лучший по score.
+4. **JFR evaluation** (--enable-jfr): к бенчмарку добавляется JFR-профилирование (CPU samples от jcmd) для точного сравнения вариантов.
 
 ---
 
@@ -641,9 +764,9 @@ re.sub(
 
 Генерация кода через OpenAI-compatible API:
 
-1. **Системный промпт** (`agent.py:SYSTEM_PROMPT`): описывает правила -- сохранять API-контракты, не удалять поведение, output в ```java блоках
+1. **Системный промпт** (`agent.py:SYSTEM_PROMPT`): описывает правила -- сохранять API-контракты, не удалять поведение, output в ` ``` `java` `` ` блоках
 2. **Промпт пользователя** (`generator_prompt.jinja2`): содержит исходный код, findings из findings.json, complexity-анализ, feedback от evaluator
-3. **Извлечение кода** (`extract_code_block()`): из ответа LLM парсится блок ```java ... ```
+3. **Извлечение кода** (`extract_code_block()`): из ответа LLM парсится блок ` ``` `java ... ` ``` `` `
 4. **Fallback**: если LLM API недоступен -- переключение на offline mode
 
 Провайдеры: DeepSeek (по умолчанию), OpenAI, любой OpenAI-compatible endpoint.
