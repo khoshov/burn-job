@@ -117,8 +117,8 @@ def evaluate_variants_via_cypher(conn) -> dict:
             variant_name = run_id.replace(f"{case_id}_", "")
             ranked_variants.append({
                 "variant": variant_name,
-                "sample_count": samples,
-                "call_edges": edges
+                "sample_count": int(samples),
+                "call_edges": int(edges)
             })
             print(f"  ├─ Variant [{variant_name:10s}] -> KùzuDB Samples: {int(samples):4d} | Call Edges: {edges}")
 
@@ -133,7 +133,7 @@ def evaluate_variants_via_cypher(conn) -> dict:
                 "title": case_info["title"],
                 "ranked_variants": ranked_variants,
                 "winning_variant": winner["variant"],
-                "winning_samples": winner["sample_count"]
+                "winning_samples": int(winner["sample_count"])
             }
 
     return evaluation_report
