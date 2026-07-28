@@ -118,11 +118,17 @@ def parse_collapsed_stack(file_path: str) -> Tuple[Dict[Tuple[str, str], int], D
             # Count leaf (self) sample
             method_counts[frames[-1]] += count
 
+            # Ensure all frames are registered as Method nodes
+            for f in frames:
+                if f not in method_counts:
+                    method_counts[f] = 0
+
             # Build edges
             for i in range(len(frames) - 1):
                 caller = frames[i]
                 callee = frames[i + 1]
                 edge_counts[(caller, callee)] += count
+
 
     if actual_path != file_path and os.path.exists(actual_path):
         try:

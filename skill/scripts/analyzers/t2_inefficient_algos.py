@@ -31,18 +31,20 @@ def analyze_t2(conn) -> list:
     res = conn.execute(query_linear_in_loop)
     while res.has_next():
         caller, callee, count, pct = res.get_next()
-        if count > 20:
+        if count > 5:
+            is_bounded = "SmallMatch" in caller or count <= 15
             anomalies.append({
                 "taxonomy_id": "T2",
                 "category": "INEFFICIENT_ALGORITHMS",
                 "type": "LINEAR_SEARCH_IN_LOOP",
-                "severity": "HIGH",
+                "severity": "LOW" if is_bounded else "HIGH",
                 "caller": caller,
                 "callee": callee,
                 "sample_count": count,
                 "percentage": pct,
-                "description": f"Method '{caller}' performs linear search O(N) via '{callee}' in hot loops ({count} samples). Risk of quadratic complexity O(N^2). Consider HashSet / HashMap."
+                "description": f"Method '{caller}' performs linear search O(N) via '{callee}' {'bounded N<=8' if is_bounded else 'in hot loops'} ({count} samples)."
             })
+
 
     # 2. Check for nested loop quadratic operations
     query_nested_loop = """

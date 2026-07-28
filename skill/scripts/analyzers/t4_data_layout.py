@@ -27,24 +27,27 @@ def analyze_t4(conn) -> list:
            OR (b.className CONTAINS 'Long' AND b.methodName = 'valueOf')
            OR (b.className CONTAINS 'HashMap$Node')
            OR (b.className CONTAINS 'ArrayList' AND b.methodName = 'grow')
+           OR (b.className CONTAINS 'ClassLayout' OR b.methodName CONTAINS 'parseInstance')
         RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
         ORDER BY r.count DESC
     """
     res = conn.execute(query_boxed_allocations)
     while res.has_next():
         caller, callee, count, pct = res.get_next()
-        if count > 30:
+        if count > 5:
+            is_jol = "jol" in callee.lower() or "classlayout" in callee.lower()
             anomalies.append({
                 "taxonomy_id": "T4",
                 "category": "DATA_LAYOUT",
                 "type": "BOXED_WRAPPER_OVERHEAD",
-                "severity": "MEDIUM",
+                "severity": "LOW" if is_jol else "MEDIUM",
                 "caller": caller,
                 "callee": callee,
                 "sample_count": count,
                 "percentage": pct,
-                "description": f"High allocation overhead in '{caller}' creating boxed primitives or resizing collection nodes ({count} samples). Consider primitive arrays (int[]) or initial capacity sizing."
+                "description": f"Field order inspection JOL padding in '{caller}' -> '{callee}' ({count} samples)." if is_jol else f"High allocation overhead in '{caller}' creating boxed primitives ({count} samples)."
             })
+
 
     # 2. Heavy DTO / Entity memory layout allocations
     query_heavy_layout = """

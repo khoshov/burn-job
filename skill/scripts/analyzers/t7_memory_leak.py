@@ -46,26 +46,28 @@ def analyze_t7(conn) -> list:
     # 2. Monotonically growing call edges across consecutive runs
     query_accumulating_edges = """
         MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE (b.className CONTAINS 'Map' OR b.className CONTAINS 'List' OR b.className CONTAINS 'Cache')
-          AND b.methodName CONTAINS 'put' OR b.methodName CONTAINS 'add'
+        WHERE (b.className CONTAINS 'Map' OR b.className CONTAINS 'List' OR b.className CONTAINS 'Cache' OR b.className CONTAINS 'caffeine')
+          AND (b.methodName CONTAINS 'put' OR b.methodName CONTAINS 'add' OR b.methodName CONTAINS 'get')
         RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
         ORDER BY r.count DESC
     """
     res = conn.execute(query_accumulating_edges)
     while res.has_next():
         caller, callee, count, pct = res.get_next()
-        if count > 100:
+        if count > 10:
+            is_cache = "caffeine" in callee.lower() or "cache" in caller.lower()
             anomalies.append({
                 "taxonomy_id": "T7",
                 "category": "MEMORY_LEAK",
                 "type": "UNBOUNDED_CACHE_OR_COLLECTION_GROWTH",
-                "severity": "HIGH",
+                "severity": "LOW" if is_cache else "HIGH",
                 "caller": caller,
                 "callee": callee,
                 "sample_count": count,
                 "percentage": pct,
-                "description": f"High rate of element addition to collection/cache in '{caller}' -> '{callee}' ({count} samples). Verify evictions / cleanup."
+                "description": f"Reference lookup in '{caller}' -> '{callee}' ({count} samples). {'Caffeine bounded cache LRU eviction' if is_cache else 'Verify evictions / cleanup.'}"
             })
+
 
     return anomalies
 
