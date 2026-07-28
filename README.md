@@ -75,10 +75,6 @@
 │  │  │  Шаг 3: _merge_dual_evidence()   ││            │ │  • HAS_DEFECT (severity)    │
 │  │  │  cross-референс графа и статики  ││            │ └─────────────────────────────┘
 │  │  ├─────────────────────────────────┤│            │
-│  │  │  Шаг 4: Composite detectors     ││            │
-│  │  │  (комбинация T2+T6, T9+T7,      ││            │
-│  │  │   T5+callgraph, T3+T3)           ││            │
-│  │  └─────────────────────────────────┘│            │
 │  │                                      │            │
 │  │  _shared.py — консолидированные      │            │
 │  │  утилиты (iter_java_files,           │            │
@@ -146,7 +142,6 @@ burn-job/
 │   │   ├── differential.py        # Cross-run сравнение (baseline vs candidate)
 │   │   ├── source_mapping.py      # Method FQN → source file/line
 │   │   ├── non_defects.py         # Классификация non-defect (Section 7 rules)
-│   │   ├── composite.py           # Cross-cutting композитные детекторы + confidence scoring
 │   │   ├── orchestrate.py         # Главный оркестратор (analyze_anomalies)
 │   │   └── taxonomy/              # T1-T9 анализаторы (обёртки над rule_engine.py)
 │   ├── graph/                     # Интеграция с KùzuDB
@@ -289,9 +284,6 @@ rules:
                                 │  • confidence: 0.5..0.95
                                 │
                     ┌────────────▼─────────────┐
-                    │ 4. Composite detectors    │ ◄─── composite.py
-                    │  (cross-cutting кейсы)    │      (T2+T6, T9+T7, etc.)
-                    └────────────┬─────────────┘
                                 │ final[]
                                 │  (sorted: dual-evidence first)
                                 ▼
@@ -318,17 +310,17 @@ if static_list and graph_list:
 
 ### Сводная таблица способов обнаружения
 
-| ID | Дефект | Graph DB | Static AST | Composite | Confidence |
+| ID | Дефект | Graph DB | Static AST | Confidence |
 |----|--------|:--------:|:----------:|:---------:|:----------:|
-| **T1** | Redundant Operations | Cypher (r.percent > 0.4) | duplicate methods diff | — | 0.5–0.85 |
-| **T2** | Inefficient Algorithms | Cypher (LINEAR_SEARCH) | nested loop depth ≥ 2 | **T2+T6**: N+1 в цикле | 0.5–0.85 |
-| **T3** | Improper Function Usage | Cypher (HEAVY_ENTITY_FETCH) | existence check full fetch | **T3+T3**: fetch + heavy payload | 0.5–0.85 |
-| **T4** | Data Layout | Cypher (ARRAY_ALLOCATION) | object layout estimator | — | 0.5–0.7 |
-| **T5** | Redundant Checks | Cypher + reachability | static call graph (javap) | **T5+CG**: dead code + coverage gap | 0.5–0.9 |
-| **T6** | DB Queries | Cypher (N+1, save in loop) | N+1 lazy collection access | **T6+T2**: N+1 во вложенном цикле | 0.5–0.85 |
-| **T7** | Memory Leaks | Cypher (retained objects) | — | **T9+T7**: hotspot + memory growth | 0.5–0.8 |
-| **T8** | Memory Bloat | Cypher (allocations) | — | — | 0.5–0.7 |
-| **T9** | CPU Hotspots | Cypher (top-N by %) | — | **T9+T7**: hotspot + memory growth | 0.5–0.8 |
+| **T1** | Redundant Operations | Cypher (r.percent > 0.4) | duplicate methods diff | 0.5–0.85 |
+| **T2** | Inefficient Algorithms | Cypher (LINEAR_SEARCH) | nested loop depth ≥ 2 | 0.5–0.85 |
+| **T3** | Improper Function Usage | Cypher (HEAVY_ENTITY_FETCH) | existence check full fetch | 0.5–0.85 |
+| **T4** | Data Layout | Cypher (ARRAY_ALLOCATION) | object layout estimator | 0.5–0.7 |
+| **T5** | Redundant Checks | Cypher + reachability | static call graph (javap) | 0.5–0.9 |
+| **T6** | DB Queries | Cypher (N+1, save in loop) | N+1 lazy collection access | 0.5–0.85 |
+| **T7** | Memory Leaks | Cypher (retained objects) | — | 0.5–0.8 |
+| **T8** | Memory Bloat | Cypher (allocations) | — | 0.5–0.7 |
+| **T9** | CPU Hotspots | Cypher (top-N by %) | — | 0.5–0.8 |
 
 ### Принцип работы каждого детектора
 
@@ -374,7 +366,7 @@ RETURN a, b, r.count, r.count / totalSamples * 100 AS percent
 - **Graph DB**: Cypher-правила + статический call graph из `javap`
 - **Static**: `callgraph.py:build_static_call_graph()` — декомпиляция `.class` файлов через `javap -v -c -p`, построение графа вызовов
 - **Reachability**: `compute_reachable()` — BFS от entry points (Spring `@GetMapping`, `@PostMapping`, JUnit `@Test`, `main`) для определения dead code
-- **Composite**: `DEAD_CODE_WITH_COVERAGE_GAP` — методы, объявленные в графе, но недостижимые ни из одного entry point и не покрытые тестами
+
 
 #### 6. T6: `DB Queries` (Проблемы SQL-запросов)
 
@@ -389,7 +381,7 @@ RETURN a, b, r.count, r.count / totalSamples * 100 AS percent
 **Источники:**
 - **Graph DB**: `UNBOUNDED_CACHE_OR_COLLECTION_GROWTH` — MATCH callee `Map`/`List`/`Cache`/`caffeine` + `put`/`add`/`get`, `percent > 0.08`
 - **Differential**: Cross-run сравнение `RetainedObject.count` между baseline и candidate — если количество растёт → потенциальная утечка
-- **Composite**: `HOTSPOT_WITH_MEMORY_GROWTH` — метод, являющийся CPU hotspot **и** показывающий рост retained objects
+
 
 #### 8. T8: `Memory Bloat` (Раздувание памяти)
 
@@ -402,18 +394,7 @@ RETURN a, b, r.count, r.count / totalSamples * 100 AS percent
 **Источники:**
 - **Graph DB**: `CPU_HOTSPOT_METHOD` — MATCH Method с class, начинающимся с `com.example`/`examples`, `percent > 0.85`, TOP 10 по `sampleCount DESC`
 - **Graph DB**: `MICROBENCHMARK_REGEX_COMPILE` — MATCH callee `Pattern.compile`, `percent > 0.12`, exclude `Global` class
-- **Composite**: `HOTSPOT_WITH_MEMORY_GROWTH` — CPU hotspot + allocation growth
 
-### Cross-cutting композитные детекторы
-
-В дополнение к индивидуальным T1–T9, `composite.py` содержит детекторы, работающие на стыке категорий:
-
-| Композитный тип | Комбинация | Severity | Условие срабатывания |
-|----------------|-----------|----------|---------------------|
-| `N_PLUS_ONE_INSIDE_NESTED_LOOP` | T6 + T2 | CRITICAL | N+1 запрос найден внутри метода, содержащего вложенный цикл |
-| `HOTSPOT_WITH_MEMORY_GROWTH` | T9 + T7 | CRITICAL | Метод одновременно CPU hotspot (>15%) и показывает рост retained objects |
-| `DEAD_CODE_WITH_COVERAGE_GAP` | T5 + callgraph | MEDIUM | Метод объявлен, но недостижим из entry points и не покрыт тестами |
-| `FULL_FETCH_WITH_HEAVY_PAYLOAD` | T3 + T3 | HIGH | FULL_FETCH_FOR_EXISTENCE_CHECK + HEAVY_ENTITY_FETCH в одном методе |
 
 ### Dual-evidence слияние
 
@@ -671,11 +652,10 @@ SAVE_IN_LOOP_UNBATCHED, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP, HEAVY_EN
 
 ### Этап 5: Детекция дефектов (T1–T9) — **центральный этап** ⚙️
 - `analyze_anomalies()` в `orchestrate.py`
-- 4 суб-этапа:
+- 3 суб-этапа:
   1. **KuzuDB analyzers**: `rule_engine.run()` выполняет Cypher-запросы из `graph_rules.yaml` для T1–T9
   2. **Static AST detectors**: `patterns.py` обходит Java-файлы напрямую
-  3. **`_merge_dual_evidence()`**: Cross-референс результатов
-  4. **Composite detectors**: `composite.py` находит cross-cutting кейсы
+  3. **`_merge_dual_evidence()`**: Cross-референс результатов (при обнаружении одного дефекта и в графе, и в статике)
 - Результат: список anomaly-словарей с confidence, evidence_detail, _approaches
 - **LLM не используется** — все детекторы rule-based, ни один не вызывает LLM API
 
@@ -925,7 +905,7 @@ burn-job version
 ### Прямой запуск детекторов
 
 ```bash
-# Все детекторы (T1–T9) + composite + cross-reference
+# Все детекторы (T1–T9) + cross-reference
 python -m burn_job.detectors.orchestrate \
   --db-path ./profiler_graph.db
 
@@ -933,11 +913,6 @@ python -m burn_job.detectors.orchestrate \
 python -m burn_job.detectors.orchestrate \
   --db-path ./profiler_graph.db \
   --category T1,T2,T6
-
-# Без композитных детекторов
-python -m burn_job.detectors.orchestrate \
-  --db-path ./profiler_graph.db \
-  --no-composite
 
 # Без cross-reference (отдельные списки graph и static)
 python -m burn_job.detectors.orchestrate \

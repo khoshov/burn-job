@@ -3,7 +3,7 @@
 from burn_job.detectors.base import BaseDetector
 from burn_job.detectors.rule_engine import RuleEngine
 from burn_job.detectors.taxonomy import T1RedundantOpsDetector
-from burn_job.detectors.composite import combine_all, compute_confidence
+from burn_job.detectors.orchestrate import compute_confidence
 from burn_job.detectors._shared import (
     SRC_ROOT,
     REPO_ROOT,
@@ -24,7 +24,6 @@ __all__ = [
     "BaseDetector",
     "RuleEngine",
     "T1RedundantOpsDetector",
-    "combine_all",
     "compute_confidence",
     "SRC_ROOT",
     "REPO_ROOT",
