@@ -2,11 +2,12 @@
 Static (source-level) object field layout estimator.
 """
 
+import json
 import os
 import re
 from typing import Dict, List, Tuple
 
-from burn_job.detectors.source_mapping import _scan_braces
+from burn_job.detectors._shared import SRC_ROOT, REPO_ROOT, extract_top_level_statements, scan_braces
 
 _HEADER_SIZE = 12
 _OBJECT_ALIGNMENT = 8
@@ -62,69 +63,6 @@ _FIELD_DECL_RE = re.compile(
 _STATIC_MODIFIER_RE = re.compile(r"\bstatic\b")
 
 
-def _extract_top_level_statements(class_body_text: str) -> List[str]:
-    statements = []
-    buf: List[str] = []
-    depth = 0
-    in_line_comment = in_block_comment = in_string = in_char = False
-    n = len(class_body_text)
-    i = 0
-    while i < n:
-        c = class_body_text[i]
-        nxt = class_body_text[i + 1] if i + 1 < n else ""
-        if in_line_comment:
-            if c == "\n":
-                in_line_comment = False
-        elif in_block_comment:
-            if c == "*" and nxt == "/":
-                in_block_comment = False
-                i += 1
-        elif in_string:
-            if depth == 0:
-                buf.append(c)
-            if c == "\\":
-                i += 1
-                if depth == 0 and i < n:
-                    buf.append(class_body_text[i])
-            elif c == '"':
-                in_string = False
-        elif in_char:
-            if depth == 0:
-                buf.append(c)
-            if c == "\\":
-                i += 1
-                if depth == 0 and i < n:
-                    buf.append(class_body_text[i])
-            elif c == "'":
-                in_char = False
-        else:
-            if c == "/" and nxt == "/":
-                in_line_comment = True
-                i += 1
-            elif c == "/" and nxt == "*":
-                in_block_comment = True
-                i += 1
-            elif c == '"':
-                in_string = True
-                if depth == 0:
-                    buf.append(c)
-            elif c == "'":
-                in_char = True
-                if depth == 0:
-                    buf.append(c)
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-            elif c == ";" and depth == 0:
-                statements.append("".join(buf).strip())
-                buf = []
-            elif depth == 0:
-                buf.append(c)
-        i += 1
-    return statements
-
-
 def extract_instance_fields(source_text: str, simple_class_name: str) -> List[Tuple[str, str]]:
     class_re = re.compile(r"\b(?:class|record)\s+" + re.escape(simple_class_name) + r"\b")
     m = class_re.search(source_text)
@@ -134,11 +72,11 @@ def extract_instance_fields(source_text: str, simple_class_name: str) -> List[Tu
     if body_start == -1:
         return []
 
-    body_end = _scan_braces(source_text, body_start)
+    body_end = scan_braces(source_text, body_start)
     class_body = source_text[body_start + 1: body_end]
 
     fields = []
-    for stmt in _extract_top_level_statements(class_body):
+    for stmt in extract_top_level_statements(class_body):
         if not stmt or "(" in stmt:
             continue
         if _STATIC_MODIFIER_RE.search(stmt):
@@ -163,7 +101,6 @@ def compute_layout_for_source_file(file_path: str, simple_class_name: str) -> Di
 
 def main():
     import argparse
-    import json
 
     parser = argparse.ArgumentParser(description="Static field-layout heuristic for a single Java class")
     parser.add_argument("file", help="Path to a .java source file")

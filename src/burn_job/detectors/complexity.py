@@ -9,45 +9,9 @@ import os
 import re
 import sys
 
+from burn_job.detectors._shared import read_file, span_end, strip_comments, iter_java_files
+
 logger = logging.getLogger("complexity_analyzer")
-
-
-def _strip_comments(code: str) -> str:
-    in_string = False
-    string_char = None
-    i = 0
-    result = []
-    n = len(code)
-    while i < n:
-        if in_string:
-            result.append(code[i])
-            if code[i] == '\\':
-                i += 1
-                if i < n:
-                    result.append(code[i])
-            elif code[i] == string_char:
-                in_string = False
-            i += 1
-            continue
-        if code[i] in ('"', "'"):
-            in_string = True
-            string_char = code[i]
-            result.append(code[i])
-            i += 1
-            continue
-        if code[i:i+2] == '//':
-            while i < n and code[i] != '\n':
-                i += 1
-            continue
-        if code[i:i+2] == '/*':
-            i += 2
-            while i < n and code[i:i+2] != '*/':
-                i += 1
-            i += 2
-            continue
-        result.append(code[i])
-        i += 1
-    return ''.join(result)
 
 
 def _detect_loop_nesting(code_stripped: str):
@@ -173,7 +137,7 @@ def _check_region_for_patterns(code: str, start: int, end: int):
 
 def analyze_complexity(source_code: str, language: str = 'java') -> dict:
     try:
-        code = _strip_comments(source_code)
+        code = strip_comments(source_code)
     except Exception as e:
         logger.error(f"Failed to strip comments: {e}")
         code = source_code
@@ -267,8 +231,7 @@ def main():
     args = parser.parse_args()
 
     if args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
-            code = f.read()
+        code = read_file(args.file)
     elif args.code:
         code = args.code
     else:

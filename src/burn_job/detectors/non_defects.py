@@ -8,9 +8,9 @@ from typing import Any, Dict, Optional, Tuple
 
 from burn_job.detectors.source_mapping import resolve_source_location, _class_index
 from burn_job.detectors.object_layout import compute_layout_for_source_file
+from burn_job.detectors._shared import REPO_ROOT, read_source_window
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 
 
 NON_DEFECT_RULES = {
@@ -78,17 +78,6 @@ def _resolve_any(value: str) -> Optional[Tuple[str, int, int]]:
         return None
 
 
-def _read_source_window(file_rel_path: str, line_from: int, before: int = 3, after: int = 2) -> Optional[str]:
-    try:
-        with open(os.path.join(REPO_ROOT, file_rel_path), "r", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except OSError:
-        return None
-    start = max(0, line_from - 1 - before)
-    end = min(len(lines), line_from + after)
-    return "\n".join(lines[start:end])
-
-
 def _verify_field_ordering(anomaly: Dict[str, Any]) -> Optional[bool]:
     if anomaly.get("type") != "WASTED_FIELD_PADDING":
         return None
@@ -116,7 +105,7 @@ def _verify_static_bound(anomaly: Dict[str, Any]) -> Optional[bool]:
     if location is None:
         return None
     file_path, line_from, _ = location
-    window = _read_source_window(file_path, line_from)
+    window = read_source_window(file_path, line_from)
     if window is None:
         return None
 

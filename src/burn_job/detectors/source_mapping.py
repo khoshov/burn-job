@@ -2,15 +2,14 @@
 Method (FQN) -> source file / line range resolver.
 """
 
+import functools
 import os
 import re
 import subprocess
-import functools
 from typing import Dict, Optional, Tuple
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-SRC_ROOT = os.path.join(REPO_ROOT, "java", "src", "main", "java")
+from burn_job.detectors._shared import REPO_ROOT, SRC_ROOT, scan_braces, line_of
+
 TARGET_CLASSES = os.path.join(REPO_ROOT, "java", "target", "classes")
 
 _LAMBDA_CLASS_RE = re.compile(r"\$\$Lambda\$")
@@ -45,56 +44,6 @@ def _read_source(file_rel_path: str) -> str:
         return f.read()
 
 
-def _line_of(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
-
-
-def _scan_braces(text: str, open_brace_index: int) -> int:
-    depth = 0
-    i = open_brace_index
-    n = len(text)
-    in_line_comment = in_block_comment = in_string = in_char = False
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-        if in_line_comment:
-            if c == "\n":
-                in_line_comment = False
-        elif in_block_comment:
-            if c == "*" and nxt == "/":
-                in_block_comment = False
-                i += 1
-        elif in_string:
-            if c == "\\":
-                i += 1
-            elif c == '"':
-                in_string = False
-        elif in_char:
-            if c == "\\":
-                i += 1
-            elif c == "'":
-                in_char = False
-        else:
-            if c == "/" and nxt == "/":
-                in_line_comment = True
-                i += 1
-            elif c == "/" and nxt == "*":
-                in_block_comment = True
-                i += 1
-            elif c == '"':
-                in_string = True
-            elif c == "'":
-                in_char = True
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return i
-        i += 1
-    return n - 1
-
-
 def _find_method_body_range(text: str, method_name: str) -> Optional[Tuple[int, int]]:
     pattern = re.compile(r"\b" + re.escape(method_name) + r"\s*\(")
     n = len(text)
@@ -125,9 +74,9 @@ def _find_method_body_range(text: str, method_name: str) -> Optional[Tuple[int, 
                 j += 1
 
         if j < n and text[j] == "{":
-            decl_line = _line_of(text, m.start())
-            body_end = _scan_braces(text, j)
-            return decl_line, _line_of(text, body_end)
+            decl_line = line_of(text, m.start())
+            body_end = scan_braces(text, j)
+            return decl_line, line_of(text, body_end)
     return None
 
 
@@ -139,8 +88,8 @@ def _find_class_body_range(text: str, simple_class_name: str) -> Optional[Tuple[
     brace_index = text.find("{", m.end())
     if brace_index == -1:
         return None
-    body_end = _scan_braces(text, brace_index)
-    return _line_of(text, m.start()), _line_of(text, body_end)
+    body_end = scan_braces(text, brace_index)
+    return line_of(text, m.start()), line_of(text, body_end)
 
 
 def _parse_javap_line_table(class_fqn: str, method_name: str, classpath: str) -> Optional[Tuple[int, int]]:
