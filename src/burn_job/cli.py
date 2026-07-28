@@ -11,7 +11,13 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from burn_job.core.config import REPO_ROOT, DEFAULT_DB_PATH, DEFAULT_PROFILE_PATH, DEFAULT_HOST
+from burn_job.core.config import (
+    REPO_ROOT,
+    DEFAULT_SRC_DIR,
+    DEFAULT_DB_PATH,
+    DEFAULT_PROFILE_PATH,
+    DEFAULT_HOST,
+)
 from burn_job.core.logging import setup_logger
 from burn_job.pipeline.scanner import ControllerScanner
 from burn_job.graph.store import KuzuGraphStore
@@ -37,7 +43,7 @@ class BackendEnum(str, Enum):
 @app.command("scan", help="Scan Java Spring REST controllers for endpoints.")
 def scan(
     src: str = typer.Option(
-        os.path.join(REPO_ROOT, "java", "src", "main", "java"),
+        DEFAULT_SRC_DIR,
         "--src",
         help="Path to Java source directory",
     ),
@@ -80,6 +86,7 @@ def ingest(
 
 @app.command("run-cycle", help="Run full 8-step autonomous performance optimization cycle.")
 def run_cycle(
+    src: str = typer.Option(DEFAULT_SRC_DIR, "--src", help="Path to Java source code directory"),
     db: str = typer.Option(DEFAULT_DB_PATH, "--db", help="Path to KuzuDB database"),
     profile: str = typer.Option(DEFAULT_PROFILE_PATH, "--profile", help="Path to profile file"),
     host: str = typer.Option(DEFAULT_HOST, "--host", help="Target API host"),
@@ -89,10 +96,11 @@ def run_cycle(
 ):
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
-        f"Backend: [yellow]{backend.value}[/yellow] | Online: [magenta]{online}[/magenta]",
+        f"Target Src: [green]{src}[/green] | Backend: [yellow]{backend.value}[/yellow] | Online: [magenta]{online}[/magenta]",
         title="[bold green]Starting Cycle[/bold green]"
     ))
     orchestrator = AutonomousOrchestrator(
+        src_dir=src,
         db_path=db,
         profile_path=profile,
         host=host,

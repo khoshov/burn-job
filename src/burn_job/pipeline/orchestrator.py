@@ -8,6 +8,7 @@ from typing import Dict, Any
 
 from burn_job.core.config import (
     REPO_ROOT,
+    DEFAULT_SRC_DIR,
     DEFAULT_DB_PATH,
     DEFAULT_PROFILE_PATH,
     RUN_LOG_PATH,
@@ -29,6 +30,7 @@ class AutonomousOrchestrator:
 
     def __init__(
         self,
+        src_dir: str = DEFAULT_SRC_DIR,
         db_path: str = DEFAULT_DB_PATH,
         profile_path: str = DEFAULT_PROFILE_PATH,
         host: str = DEFAULT_HOST,
@@ -38,6 +40,7 @@ class AutonomousOrchestrator:
         model_path: str = None,
         backend: str = "auto",
     ):
+        self.src_dir = src_dir
         self.db_path = db_path
         self.profile_path = profile_path
         self.host = host
@@ -57,8 +60,7 @@ class AutonomousOrchestrator:
 
         # STEP 1: Scan REST Controllers
         logger.info("STEP 1/8: Scanning Java REST Controllers...")
-        src_dir = os.path.join(REPO_ROOT, "java", "src", "main", "java")
-        endpoints = ControllerScanner.scan_directory(src_dir)
+        endpoints = ControllerScanner.scan_directory(self.src_dir)
         logger.info(f"Found {len(endpoints)} REST API endpoints.")
 
         # STEP 2: Generate Load Test Suite
