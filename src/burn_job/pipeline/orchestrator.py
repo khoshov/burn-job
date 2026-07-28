@@ -1,15 +1,12 @@
-"""
-Autonomous End-to-End Optimization Cycle Orchestrator Module.
-"""
+"""Autonomous End-to-End Optimization Cycle Orchestrator Module."""
 
 import os
 import sys
-import time
 import json
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
-from burn_job.config import (
+from burn_job.core.config import (
     REPO_ROOT,
     DEFAULT_DB_PATH,
     DEFAULT_PROFILE_PATH,
@@ -17,17 +14,15 @@ from burn_job.config import (
     DEFAULT_HOST,
     DEFAULT_MAX_ITERATIONS,
 )
-from burn_job.logging_config import setup_logger
+from burn_job.core.logging import setup_logger
 from burn_job.pipeline.scanner import ControllerScanner
 from burn_job.pipeline.loadtest import LoadtestGenerator
 from burn_job.graph.store import KuzuGraphStore
-from burn_job.pipeline.scorer import ScoringEvaluator
 from burn_job.detectors.orchestrate import analyze_anomalies
 from burn_job.report.builder import build_findings_from_anomalies, build_schema_report
 from burn_job.refinement.iterative_loop import run_iterative_loop
 
 logger = setup_logger("Orchestrator")
-
 
 class AutonomousOrchestrator:
     """Orchestrates the 8-step end-to-end performance analysis and optimization cycle."""

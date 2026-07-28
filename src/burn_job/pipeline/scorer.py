@@ -1,16 +1,11 @@
-"""
-Scoring Function Evaluator Module.
-Calculates candidate variant scores based on:
-  Score = 0.6 * Delta_Latency_p95 + 0.3 * Delta_RPS + 0.1 * Delta_GC
-"""
+"""Scoring Function Evaluator Module."""
 
 from typing import List
-from burn_job.models.variant import ScoringResult
-from burn_job.config import WEIGHT_LATENCY_P95, WEIGHT_RPS, WEIGHT_GC_ALLOC
-from burn_job.logging_config import setup_logger
+from burn_job.domain.variant import ScoringResult
+from burn_job.core.config import WEIGHT_LATENCY_P95, WEIGHT_RPS, WEIGHT_GC_ALLOC
+from burn_job.core.logging import setup_logger
 
 logger = setup_logger("Scorer")
-
 
 class ScoringEvaluator:
     """Evaluates and ranks code variant performance metrics relative to baseline."""

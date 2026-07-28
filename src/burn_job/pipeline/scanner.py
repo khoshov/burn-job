@@ -1,19 +1,16 @@
-"""
-Spring Controller Scanner Module.
-"""
+"""Spring Controller Scanner Module."""
 
 import os
 import re
 from typing import List
 
-from burn_job.models.endpoint import EndpointInfo
-from burn_job.logging_config import setup_logger
+from burn_job.domain.endpoint import EndpointInfo
+from burn_job.core.logging import setup_logger
 
 logger = setup_logger("Scanner")
 
-
 class ControllerScanner:
-    """Scans Java source files in src/main/java for Spring @RestController mappings."""
+    """Scans Java source files for Spring REST Controller endpoints."""
 
     @staticmethod
     def scan_directory(src_dir: str) -> List[EndpointInfo]:
@@ -23,10 +20,6 @@ class ControllerScanner:
             return endpoints
 
         mapping_pattern = re.compile(
-            r'@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?(?:path\s*=\s*)?["\']([^"\']+)["\']',
-            re.IGNORECASE
-        )
-        class_mapping_pattern = re.compile(
             r'@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?(?:path\s*=\s*)?["\']([^"\']+)["\']',
             re.IGNORECASE
         )
@@ -51,7 +44,7 @@ class ControllerScanner:
                     class_name = class_match.group(1)
 
                 base_path = ""
-                base_match = class_mapping_pattern.search(content[:content.find("class ")]) if "class " in content else None
+                base_match = mapping_pattern.search(content[:content.find("class ")]) if "class " in content else None
                 if base_match:
                     base_path = base_match.group(2)
 

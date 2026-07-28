@@ -1,4 +1,11 @@
-from burn_job.graph.store import KuzuGraphStore
-from burn_job.graph.ingest import parse_profile, ingest_to_kuzu
+"""Burn-Job Graph Storage Package."""
 
-__all__ = ["KuzuGraphStore", "parse_profile", "ingest_to_kuzu"]
+from burn_job.graph.store import KuzuGraphStore
+from burn_job.graph.ingest import parse_profile, ingest_to_kuzu, parse_collapsed_stack
+
+__all__ = [
+    "KuzuGraphStore",
+    "parse_profile",
+    "ingest_to_kuzu",
+    "parse_collapsed_stack",
+]

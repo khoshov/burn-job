@@ -1,17 +1,12 @@
-"""
-KuzuDB Embedded Graph Database Store & Ingestor Module.
-"""
+"""KuzuDB Embedded Graph Database Store & Ingestor Module."""
 
 import os
-import sys
-import json
-import subprocess
-import datetime
 from collections import defaultdict
-from typing import Dict, Tuple, List, Any, Optional
+from typing import Dict, Tuple, Any, Optional
 
-from burn_job.config import DEFAULT_DB_PATH
-from burn_job.logging_config import setup_logger
+from burn_job.core.config import DEFAULT_DB_PATH
+from burn_job.core.logging import setup_logger
+from burn_job.core.exceptions import GraphStoreError
 
 logger = setup_logger("GraphStore")
 
@@ -37,9 +32,13 @@ class KuzuGraphStore:
             logger.warning("KuzuDB python package not installed.")
             return
         os.makedirs(self.db_path, exist_ok=True)
-        self.db = kuzu.Database(self.db_path)
-        self.conn = kuzu.Connection(self.db)
-        self.init_schema()
+        try:
+            self.db = kuzu.Database(self.db_path)
+            self.conn = kuzu.Connection(self.db)
+            self.init_schema()
+        except Exception as e:
+            logger.error(f"Failed to initialize KuzuDB at {self.db_path}: {e}")
+            raise GraphStoreError(f"Database connection failed: {e}") from e
 
     def execute(self, query: str, params: dict = None) -> Any:
         if not self.conn:

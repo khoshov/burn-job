@@ -1,16 +1,13 @@
-"""
-Load Test Generator Module.
-"""
+"""Load Test Generator Module."""
 
 import json
 import os
 from typing import List
 
-from burn_job.models.endpoint import EndpointInfo
-from burn_job.logging_config import setup_logger
+from burn_job.domain.endpoint import EndpointInfo
+from burn_job.core.logging import setup_logger
 
 logger = setup_logger("LoadtestGenerator")
-
 
 class LoadtestGenerator:
     """Generates Python load test scripts for scanned Spring endpoints."""

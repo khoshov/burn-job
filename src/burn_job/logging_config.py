@@ -1,36 +1,10 @@
-"""
-Centralized Logging Configuration for Performance Optimization Pipeline.
-"""
+"""Legacy logging_config module alias (deprecated). Re-exports from burn_job.core.logging."""
 
-import logging
-import os
-import sys
-from burn_job.config import RUN_LOG_PATH
+import warnings
+from burn_job.core.logging import setup_logger
 
-
-def setup_logger(name: str = "pipeline", log_file: str = None, level: int = logging.INFO) -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-
-    if logger.handlers:
-        return logger
-
-    formatter = logging.Formatter(
-        fmt="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
-
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(level)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
-    target_log_file = log_file or RUN_LOG_PATH
-    if target_log_file:
-        os.makedirs(os.path.dirname(target_log_file), exist_ok=True)
-        fh = logging.FileHandler(target_log_file, encoding="utf-8")
-        fh.setLevel(level)
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-
-    return logger
+warnings.warn(
+    "Importing from 'burn_job.logging_config' is deprecated; use 'burn_job.core.logging' instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

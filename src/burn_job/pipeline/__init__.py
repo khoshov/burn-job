@@ -1,6 +1,4 @@
-"""
-Core pipeline modules: orchestration, controller scanning, load test generation, scoring.
-"""
+"""Burn-Job Pipeline Package."""
 
 from burn_job.pipeline.scanner import ControllerScanner
 from burn_job.pipeline.loadtest import LoadtestGenerator

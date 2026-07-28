@@ -1,18 +1,13 @@
-"""
-Profiler Call Graph Ingestor for KuzuDB Wrapper.
-"""
+"""Profiler Call Graph Ingestor for KuzuDB Wrapper."""
 
-import sys
 import os
 import argparse
-
+from burn_job.core.config import DEFAULT_DB_PATH
 from burn_job.graph.store import KuzuGraphStore
-
 
 def parse_profile(profile_path: str):
     edge_counts, method_counts, total_samples = KuzuGraphStore._parse_collapsed(profile_path)
     return edge_counts, method_counts, total_samples, {}
-
 
 def ingest_to_kuzu(db_path: str, run_id: str, test_name: str, edge_counts, method_counts, total_samples, other_jfr_events=None):
     store = KuzuGraphStore(db_path)
@@ -26,30 +21,22 @@ def ingest_to_kuzu(db_path: str, run_id: str, test_name: str, edge_counts, metho
         cypher = f"MATCH (a:Method {{name: '{caller}'}}), (b:Method {{name: '{callee}'}}) CREATE (a)-[:CALLS {{count: {weight}}}]->(b);"
         store.execute(cypher)
 
-
 def parse_collapsed_stack(file_path: str) -> dict:
     edge_counts, method_counts, total_samples = KuzuGraphStore._parse_collapsed(file_path)
     return method_counts
 
-
 def convert_jfr_if_needed(file_path: str) -> dict:
     return parse_collapsed_stack(file_path)
-
-
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-
 
 def main():
     parser = argparse.ArgumentParser(description="Ingest JFR or Collapsed Stack Traces into KuzuDB")
     parser.add_argument("--input", "-i", required=True, help="Path to profile file")
-    parser.add_argument("--db-path", "--db", default=os.path.join(REPO_ROOT, "profiler_graph.db"), help="KuzuDB directory")
+    parser.add_argument("--db-path", "--db", default=DEFAULT_DB_PATH, help="KuzuDB directory")
     args = parser.parse_args()
 
     store = KuzuGraphStore(args.db_path)
     store.ingest_profile(args.input)
     print(f"Successfully ingested '{args.input}' into KuzuDB graph at '{args.db_path}'.")
-
 
 if __name__ == "__main__":
     main()
