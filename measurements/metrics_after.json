@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-07-28T15:00:00Z",
+  "profile": "load",
+  "endpoints": {
+    "/api/demo/n-plus-one/good": {
+      "sql_count": 1,
+      "elapsed_ms": 17.0,
+      "entities_loaded": 100
+    },
+    "/api/demo/in-memory-filter/good": {
+      "jvm_allocated_bytes": 120000,
+      "elapsed_ms": 15.9
+    },
+    "/api/demo/save-in-loop/compare": {
+      "batched_execution_ms": 42
+    },
+    "/api/demo/entity-fetch/good": {
+      "selected_bytes": 8192
+    }
+  }
+}

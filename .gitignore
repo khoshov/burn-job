@@ -1,0 +1,7 @@
+target/
+.venv/
+*.db
+*.collapsed
+.DS_Store
+.idea/
+*.class

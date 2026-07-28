@@ -1,0 +1,28 @@
+[2026-07-28T16:58:53.632761] [INFO] === STARTING LLM CODE REFACTORING AGENT ===
+[2026-07-28T16:58:53.633031] [INFO] Loaded 4 findings from report.
+[2026-07-28T16:58:53.633204] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/NPlusOneService.java (Lines 27-38)
+[2026-07-28T16:58:53.633249] [INFO] Taxonomy: ['T6', 'T2'] | Family: db
+[2026-07-28T16:58:53.633418] [INFO] Mechanism: Инициализация ленивой коллекции d.getEmployees().size() в цикле по каждому отделу
+[2026-07-28T16:58:53.633504] [INFO] Recommended Fix: Использовать JOIN FETCH (findAllWithEmployeesOptimal()) в JPQL для загрузки отделов и сотрудников за один SQL-запрос
+[2026-07-28T16:58:53.633679] [INFO] Applying fallback offline pattern refactoring for src/main/java/com/example/badhibernate/service/NPlusOneService.java
+[2026-07-28T16:58:53.633794] [INFO] [DRY RUN] Would write updated content to src/main/java/com/example/badhibernate/service/NPlusOneService.java (Length: 2014 chars).
+[2026-07-28T16:58:53.633835] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (Lines 29-45)
+[2026-07-28T16:58:53.633862] [INFO] Taxonomy: ['T8', 'T3'] | Family: memory
+[2026-07-28T16:58:53.633885] [INFO] Mechanism: Загрузка всех записей таблицы через orderRepository.findAll() в кучу JVM с последующей фильтрацией и пагинацией через Stream API
+[2026-07-28T16:58:53.633910] [INFO] Recommended Fix: Переложить фильтрацию (WHERE) и пагинацию (LIMIT/OFFSET) на СУБД через Spring Data Pageable (findByStatusOptimal)
+[2026-07-28T16:58:53.634029] [INFO] Applying fallback offline pattern refactoring for src/main/java/com/example/badhibernate/service/InMemoryFilterService.java
+[2026-07-28T16:58:53.634122] [INFO] [DRY RUN] Would write updated content to src/main/java/com/example/badhibernate/service/InMemoryFilterService.java (Length: 1571 chars).
+[2026-07-28T16:58:53.634157] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/SaveInLoopService.java (Lines 27-43)
+[2026-07-28T16:58:53.634182] [INFO] Taxonomy: ['T6', 'T1'] | Family: db
+[2026-07-28T16:58:53.634202] [INFO] Mechanism: Поштучный вызов employeeRepository.save(emp) в цикле без JDBC Batching
+[2026-07-28T16:58:53.634227] [INFO] Recommended Fix: Накопление списка сущностей и вызов employeeRepository.saveAll(employees) с пакетированием JDBC batching
+[2026-07-28T16:58:53.634342] [INFO] Applying fallback offline pattern refactoring for src/main/java/com/example/badhibernate/service/SaveInLoopService.java
+[2026-07-28T16:58:53.634416] [INFO] [DRY RUN] Would write updated content to src/main/java/com/example/badhibernate/service/SaveInLoopService.java (Length: 2380 chars).
+[2026-07-28T16:58:53.634446] [INFO] Processing finding for file: src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Lines 26-32)
+[2026-07-28T16:58:53.634468] [INFO] Taxonomy: ['T3', 'T4'] | Family: memory
+[2026-07-28T16:58:53.634490] [INFO] Mechanism: Загрузка полных управляемых сущностей Employee со всеми полями и тяжелыми LOB-колонками (detailedBiography) ради простых DTO
+[2026-07-28T16:58:53.634513] [INFO] Recommended Fix: Использовать Spring Data JPA Interface Projection (EmployeeSimpleProjection) с выборкой только необходимых колонок
+[2026-07-28T16:58:53.634641] [INFO] Applying fallback offline pattern refactoring for src/main/java/com/example/badhibernate/service/FullEntityFetchService.java
+[2026-07-28T16:58:53.634727] [INFO] [DRY RUN] Would write updated content to src/main/java/com/example/badhibernate/service/FullEntityFetchService.java (Length: 1710 chars).
+[2026-07-28T16:58:53.634755] [INFO] Refactoring complete. 4/4 files modified.
+[2026-07-28T16:58:53.634802] [INFO] === LLM CODE REFACTORING AGENT FINISHED SUCCESSFULLY ===

@@ -1,0 +1,21 @@
+diff --git a/src/main/resources/application.yml b/src/main/resources/application.yml
+index a1b2c3d..e4f5g6h 100644
+--- a/src/main/resources/application.yml
++++ b/src/main/resources/application.yml
+@@ -20,4 +20,4 @@ spring:
+         format_sql: true
+         generate_statistics: true
+         # Notice: Batch size intentionally left at default (disabled/1) or OSIV enabled to show anti-patterns
+-        open-in-view: true
++        open-in-view: false
+
+diff --git a/src/main/resources/application-postgres.yml b/src/main/resources/application-postgres.yml
+index b2c3d4e..f5g6h7i 100644
+--- a/src/main/resources/application-postgres.yml
++++ b/src/main/resources/application-postgres.yml
+@@ -15,4 +15,4 @@ spring:
+       hibernate:
+         format_sql: true
+         generate_statistics: true
+-        open-in-view: true
++        open-in-view: false
