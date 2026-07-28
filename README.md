@@ -138,7 +138,9 @@ burn-job run-cycle --online --base-url "http://localhost:8000/v1"
 |-------------|--------|-----------|
 | **`kuzu`** | `>= 0.3.0` | Встраиваемая графовая СУБД KùzuDB: хранение стектрейсов, узлов методов, графов вызовов (CALLS) и SQL-запросов |
 | **`jinja2`** | `>= 3.0.0` | Шаблонизатор промптов для LLM-агента генерации оптимизированных вариантов кода |
-| **`pyyaml`** | `>= 6.0` | Парсинг `graph_rules.yaml` — externalized rule definitions для Cypher-запросов |
+| **`llama-cpp-python`** | `>= 0.3.0` | Движок локального инференса GGUF-моделей (Qwen3) с ускорением GPU (Metal/CUDA) |
+| **`typer`** | `>= 0.9.0` | Соврменный CLI-фреймворк на базе **Click** с типизацией и форматированием вывода |
+| **`rich`** | `>= 13.0.0` | Красивое форматирование консольного вывода CLI (таблицы, цвета, панели статусов) |
 | **`pytest`** *(test)* | `>= 8.0` | Основной фреймворк запуска unit, integration и contract тестов |
 
 ### Системное окружение и внешние инструменты
@@ -865,22 +867,27 @@ Score = 0.6 * deltaLatency_p95 + 0.3 * deltaRPS + 0.1 * deltaGC
 
 ## 💻 Использование CLI
 
+Единый CLI построен на фреймворке **Typer** (под управлением **Click**) с форматированием консольного вывода библиотекой **Rich**.
+
 ### Основные команды
 
 ```bash
-# Справка
+# Общая справка CLI
 burn-job --help
 
-# 1. Сканирование Spring эндпоинтов
+# 1. Сканирование Spring RestControllers (вывод в Rich-таблицу)
 burn-job scan --src ./java/src/main/java
 
-# 2. Инжест профиля async-profiler в KùzuDB
+# 2. Инжест профиля async-profiler / JFR в KùzuDB
 burn-job ingest --profile ./app_profiling_full.collapsed --db ./profiler_graph.db
 
-# 3. Запуск полного цикла авто-оптимизации
-burn-job run-cycle --db ./profiler_graph.db --host http://localhost:8080
+# 3. Запуск 8-этапного автономного цикла оптимизации (с выбором backend)
+burn-job run-cycle --backend llama.cpp --model-path Qwen3-4B/qwen3-4b-instruct.gguf
 
-# 4. Версия
+# Альтернативный запуск через vLLM
+burn-job run-cycle --backend vllm --model-path Qwen3-4B
+
+# 4. Проверка версии CLI
 burn-job version
 ```
 
