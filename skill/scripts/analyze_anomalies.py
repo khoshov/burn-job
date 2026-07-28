@@ -21,6 +21,14 @@ try:
 except ImportError:
     HAS_KUZU = False
 
+from static_callgraph import build_static_call_graph, compute_reachable  # noqa: E402
+from differential_analysis import compare_runs, list_run_ids  # noqa: E402
+from static_pattern_detectors import (  # noqa: E402
+    detect_n_plus_one,
+    detect_existence_check_full_fetch,
+    detect_nested_loops,
+    detect_duplicate_methods,
+)
 from analyzers.t1_redundant_ops import analyze_t1
 from analyzers.t2_inefficient_algos import analyze_t2
 from analyzers.t3_improper_func_usage import analyze_t3
@@ -45,8 +53,20 @@ ANALYZER_REGISTRY = {
     "T9": analyze_t9,
 }
 
+DEFAULT_CLASSPATH_DIR = os.path.join(SCRIPT_DIR, "..", "..", "target", "classes")
 
-def analyze_anomalies(db_path: str, selected_categories: list = None, annotate_non_defects: bool = True) -> list:
+# Static (source-level) structural detectors (spec 009) — additive alongside the Cypher-based
+# analyzers above, not a replacement (see plan/009's non-goals). Independent of any profiling
+# data, so they take no `conn` argument and run purely against src/main/java.
+STATIC_PATTERN_DETECTORS = {
+    "T1": detect_duplicate_methods,
+    "T2": detect_nested_loops,
+    "T3": detect_existence_check_full_fetch,
+    "T6": detect_n_plus_one,
+}
+
+
+def analyze_anomalies(db_path: str, selected_categories: list = None, annotate_non_defects: bool = True, classpath_dir: str = DEFAULT_CLASSPATH_DIR) -> list:
     if not HAS_KUZU:
         print("Error: 'kuzu' Python package is required. Install via: pip install kuzu")
         sys.exit(1)
@@ -61,17 +81,55 @@ def analyze_anomalies(db_path: str, selected_categories: list = None, annotate_n
     anomalies = []
 
     target_keys = selected_categories if selected_categories else list(ANALYZER_REGISTRY.keys())
+
+    # T5's dead-code rule needs the static call graph (spec 008) — built once here, only when T5
+    # is actually being run and compiled classes are available (otherwise it degrades gracefully:
+    # analyze_t5 skips the dead-code rule rather than fall back to unreliable dynamic-only evidence).
+    reachable_methods = declared_methods = None
+    if "T5" in [k.upper() for k in target_keys] and classpath_dir and os.path.isdir(classpath_dir):
+        call_graph, entry_points = build_static_call_graph(classpath_dir)
+        declared_methods = set(call_graph.keys())
+        reachable_methods = compute_reachable(call_graph, entry_points)
+
     for key in target_keys:
         key_upper = key.upper()
-        if key_upper in ANALYZER_REGISTRY:
-            fn = ANALYZER_REGISTRY[key_upper]
+        if key_upper not in ANALYZER_REGISTRY:
+            continue
+        fn = ANALYZER_REGISTRY[key_upper]
+        if key_upper == "T5":
+            results = fn(conn, reachable_methods=reachable_methods, declared_methods=declared_methods)
+        else:
             results = fn(conn)
-            anomalies.extend(results)
+        anomalies.extend(results)
+
+    for key in target_keys:
+        key_upper = key.upper()
+        if key_upper in STATIC_PATTERN_DETECTORS:
+            anomalies.extend(STATIC_PATTERN_DETECTORS[key_upper]())
 
     if annotate_non_defects:
-        anomalies = annotate_report_with_non_defects(anomalies)
+        context = {"growth_status": _build_growth_status(conn)} if annotate_non_defects else None
+        anomalies = annotate_report_with_non_defects(anomalies, context)
 
     return anomalies
+
+
+def _build_growth_status(conn) -> dict:
+    """
+    ND-3 (spec 012) needs real cross-run retained-count trend data. Only meaningful when the
+    database holds exactly 2 runs (same convention export_report.py uses for differential
+    evidence) — returns {} otherwise, which non_defects.py correctly treats as "no data available".
+    """
+    run_ids = list_run_ids(conn)
+    if len(run_ids) != 2:
+        return {}
+    diffs = compare_runs(conn, run_ids[0], run_ids[1])
+    status = {}
+    for d in diffs:
+        if d["metric"] != "RetainedObject.count":
+            continue
+        status[d["method"]] = "growing" if (d["delta_pct"] or 0) > 0 else "stable"
+    return status
 
 
 def format_llm_prompt(anomalies: list) -> str:
@@ -112,13 +170,14 @@ def main():
     parser = argparse.ArgumentParser(description="Orchestrator for KùzuDB taxonomy performance analyzers (T1 - T9)")
     parser.add_argument("--db-path", default="./profiler_graph.db", help="Path to KùzuDB database folder")
     parser.add_argument("--category", help="Comma-separated taxonomy IDs to run (e.g., T1,T2,T6). Default runs all.")
+    parser.add_argument("--classpath-dir", default=DEFAULT_CLASSPATH_DIR, help="Compiled .class files for T5's static reachability check (default: target/classes)")
     parser.add_argument("--json", action="store_true", help="Output findings as raw JSON")
     parser.add_argument("--prompt-only", action="store_true", help="Output only formatted LLM prompt")
 
     args = parser.parse_args()
 
     selected = [c.strip().upper() for c in args.category.split(",")] if args.category else None
-    anomalies = analyze_anomalies(args.db_path, selected)
+    anomalies = analyze_anomalies(args.db_path, selected, classpath_dir=args.classpath_dir)
 
     if args.json:
         print(json.dumps(anomalies, indent=2))

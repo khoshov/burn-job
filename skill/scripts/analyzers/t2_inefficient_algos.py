@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
 T2. Неэффективные алгоритмы (Inefficient Algorithms)
-Detects quadratic complexity patterns, linear collection searches in hot loops (List.contains / indexOf / remove),
-and O(N^2) algorithmic growth.
+Detects quadratic complexity patterns, linear collection searches in hot loops (List.contains /
+indexOf / remove), and O(N^2) algorithmic growth.
+
+LINEAR_SEARCH_IN_LOOP now lives in rules/graph_rules.yaml (spec 010). QUADRATIC_NESTED_LOOP stays
+custom Python here — it's a 2-edge chain match (a->b->c), which doesn't fit the engine's
+single-edge/single-node schema (see rule_engine.py's module docstring). See
+static_pattern_detectors.detect_nested_loops (spec 009) for the newer, structural (general
+nested-loop-shape, not List.contains-specific) detector.
 """
 
 import sys
@@ -10,43 +16,23 @@ import os
 import argparse
 import json
 
+_SCRIPTS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 try:
     import kuzu
     HAS_KUZU = True
 except ImportError:
     HAS_KUZU = False
 
+import rule_engine  # noqa: E402
+
 
 def analyze_t2(conn) -> list:
-    anomalies = []
+    anomalies = rule_engine.run(conn, "T2")
 
-    # 1. Linear collection lookups (List.contains, List.indexOf, List.remove) in hot loops
-    query_linear_in_loop = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE (b.className CONTAINS 'List' OR b.className CONTAINS 'ArrayList' OR b.className CONTAINS 'LinkedList')
-          AND (b.methodName = 'contains' OR b.methodName = 'indexOf' OR b.methodName = 'remove' OR b.methodName = 'containsAll')
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-    res = conn.execute(query_linear_in_loop)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 5:
-            is_bounded = "SmallMatch" in caller or count <= 15
-            anomalies.append({
-                "taxonomy_id": "T2",
-                "category": "INEFFICIENT_ALGORITHMS",
-                "type": "LINEAR_SEARCH_IN_LOOP",
-                "severity": "LOW" if is_bounded else "HIGH",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Method '{caller}' performs linear search O(N) via '{callee}' {'bounded N<=8' if is_bounded else 'in hot loops'} ({count} samples)."
-            })
-
-
-    # 2. Check for nested loop quadratic operations
+    # Nested loop quadratic operations — a 2-edge chain, not migrated (see module docstring).
     query_nested_loop = """
         MATCH (a:Method)-[r1:CALLS]->(b:Method)-[r2:CALLS]->(c:Method)
         WHERE b.methodName CONTAINS 'forEach' OR b.methodName CONTAINS 'map' OR b.methodName CONTAINS 'iterator'

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 T9. Избыточная нагрузка на CPU (Excessive CPU Load & Hot Paths)
-Detects CPU hotspot methods, excessive work in hot paths, and thread lock contention.
+Detects CPU hotspot methods, excessive work in hot paths, and real thread lock/park contention
+(MonitorBlock nodes, spec 002) — see plan/007-lock-contention-t9-and-regex-fix.md.
 """
 
 import sys
@@ -9,85 +10,51 @@ import os
 import argparse
 import json
 
+_SCRIPTS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 try:
     import kuzu
     HAS_KUZU = True
 except ImportError:
     HAS_KUZU = False
 
+import rule_engine  # noqa: E402
+
 
 def analyze_t9(conn) -> list:
     anomalies = []
 
-    # 1. Thread Lock Contention & Parking
+    # 1. Thread Lock Contention & Parking — real blocked duration (jdk.JavaMonitorEnter /
+    # jdk.ThreadPark events, spec 002), not a guess from "Lock"/"park"/"synchronized" in a name.
     query_lock_contention = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE b.className CONTAINS 'Lock' OR b.methodName CONTAINS 'park' OR b.methodName CONTAINS 'synchronized'
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
+        MATCH (b:MonitorBlock)-[:BLOCKED_IN]->(m:Method)
+        RETURN m.className + '.' + m.methodName AS method, sum(b.durationMs) AS totalBlockedMs, count(b) AS blockCount
+        ORDER BY totalBlockedMs DESC
     """
     res = conn.execute(query_lock_contention)
     while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        if count > 30:
+        method, total_blocked_ms, block_count = res.get_next()
+        total_blocked_ms = int(total_blocked_ms) if total_blocked_ms is not None else 0
+        block_count = int(block_count)
+        if total_blocked_ms > 100:
+            severity = "HIGH" if total_blocked_ms > 500 else "MEDIUM"
             anomalies.append({
                 "taxonomy_id": "T9",
                 "category": "CPU_LOAD",
                 "type": "THREAD_LOCK_CONTENTION",
-                "severity": "HIGH",
-                "caller": caller,
-                "callee": callee,
-                "sample_count": count,
-                "percentage": pct,
-                "description": f"Thread contention or locking block in '{caller}' ({count} samples). Thread pool bottleneck."
+                "severity": severity,
+                "caller": "Thread Contention Monitor",
+                "callee": method,
+                "sample_count": total_blocked_ms,
+                "percentage": 0.0,
+                "description": f"'{method}' spent {total_blocked_ms}ms blocked across {block_count} monitor/park events. Thread pool bottleneck.",
             })
 
-    # 2. Top CPU Hotspot Methods (High sample count spike)
-    query_cpu_hotspots = """
-        MATCH (m:Method)
-        WHERE (m.className STARTS WITH 'com.example' OR m.className STARTS WITH 'examples') AND m.sampleCount > 100
-        RETURN m.className + '.' + m.methodName AS method, m.sampleCount
-        ORDER BY m.sampleCount DESC
-        LIMIT 10
-    """
-
-    res = conn.execute(query_cpu_hotspots)
-    while res.has_next():
-        method, count = res.get_next()
-        anomalies.append({
-            "taxonomy_id": "T9",
-            "category": "CPU_LOAD",
-            "type": "CPU_HOTSPOT_METHOD",
-            "severity": "MEDIUM",
-            "caller": "Hot Execution Path",
-            "callee": method,
-            "sample_count": count,
-            "percentage": 0.0,
-            "description": f"Hotspot method '{method}' consumed {count} CPU samples. Optimize heavy loop logic or caching."
-        })
-
-    # 3. Microbenchmark noise regex compilation
-    query_regex_compile = """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
-        WHERE b.className CONTAINS 'Pattern' OR b.methodName CONTAINS 'compile'
-        RETURN a.className + '.' + a.methodName AS caller, b.className + '.' + b.methodName AS callee, r.count, r.percent
-        ORDER BY r.count DESC
-    """
-    res = conn.execute(query_regex_compile)
-    while res.has_next():
-        caller, callee, count, pct = res.get_next()
-        anomalies.append({
-            "taxonomy_id": "T9",
-            "category": "CPU_LOAD",
-            "type": "MICROBENCHMARK_REGEX_COMPILE",
-            "severity": "LOW",
-            "caller": caller,
-            "callee": callee,
-            "sample_count": count,
-            "percentage": pct,
-            "description": f"Microbenchmark noise pattern.compile in '{caller}' -> '{callee}' ({count} samples)."
-        })
-
+    # 2. CPU_HOTSPOT_METHOD and 3. MICROBENCHMARK_REGEX_COMPILE (with its Global-frame exclusion
+    # and count threshold, spec 007) now live in rules/graph_rules.yaml (spec 010).
+    anomalies.extend(rule_engine.run(conn, "T9"))
 
     return anomalies
 
