@@ -187,13 +187,39 @@ class AutonomousOrchestrator:
         rel_file = finding.get("file", "")
         if not rel_file:
             return None
-        rel_file = rel_file.replace("burn-job/", "", 1) if rel_file.startswith("burn-job/") else rel_file
-        abs_file = os.path.join(REPO_ROOT, rel_file)
-        if os.path.exists(abs_file):
-            return abs_file
-        candidate = os.path.join(os.getcwd(), rel_file)
-        if os.path.exists(candidate):
-            return candidate
+        if os.path.isabs(rel_file) and os.path.exists(rel_file):
+            return rel_file
+
+        project_dir = self._find_project_dir()
+        base_dirs = [
+            self.src_dir,
+            project_dir if project_dir else "",
+            REPO_ROOT,
+            os.getcwd(),
+        ]
+
+        # Direct joins
+        for b in base_dirs:
+            if not b:
+                continue
+            cand = os.path.join(b, rel_file)
+            if os.path.exists(cand) and os.path.isfile(cand):
+                return os.path.abspath(cand)
+
+        # Normalize relative path if it contains package/src hints
+        clean_rel = rel_file
+        if "src/main/java/" in clean_rel:
+            clean_rel = clean_rel.split("src/main/java/")[-1]
+        elif "src/" in clean_rel:
+            clean_rel = clean_rel.split("src/")[-1]
+
+        for b in base_dirs:
+            if not b:
+                continue
+            cand = os.path.join(b, clean_rel)
+            if os.path.exists(cand) and os.path.isfile(cand):
+                return os.path.abspath(cand)
+
         return None
 
     def _get_start_app_cmd(self, project_dir: str) -> List[str]:
