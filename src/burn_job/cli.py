@@ -108,9 +108,13 @@ def run_cycle(
     backend: BackendEnum = typer.Option(BackendEnum.auto, "--backend", help="LLM execution backend (auto, llama.cpp, vllm, openai)"),
     server_port: Optional[int] = typer.Option(None, "--server-port", help="Connect to running llama.cpp server on port (overrides auto-detect)"),
     variant_llm: str = typer.Option("deepseek", "--variant-llm", help="LLM backend for variant code generation: local (llama.cpp) or deepseek"),
+    max_workers: int = typer.Option(8, "--llm-workers", "--max-workers", help="Max parallel worker threads for external LLM API calls"),
+    skip_benchmark: bool = typer.Option(False, "--skip-benchmark", "--no-benchmark", help="Skip live Spring Boot restart benchmarking and evaluate variants instantly via AST score"),
 ):
     mode_str = "[green]APPLY FIXES MODE[/green]" if apply else "[yellow]REPORT ONLY MODE (No code modified)[/yellow]"
-    variant_str = f" | Variant LLM: [magenta]{variant_llm}[/magenta]"
+    variant_str = f" | Variant LLM: [magenta]{variant_llm}[/magenta] | Workers: [cyan]{max_workers}[/cyan]"
+    if skip_benchmark:
+        variant_str += " | [yellow]Skip Benchmark Active[/yellow]"
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
         f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]{variant_str}",
@@ -127,6 +131,8 @@ def run_cycle(
         backend=backend.value,
         server_port=server_port,
         variant_llm=variant_llm,
+        max_workers=max_workers,
+        skip_benchmark=skip_benchmark,
     )
     res = orchestrator.run()
     findings_json = res.get("findings_json", os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json"))

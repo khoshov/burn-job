@@ -221,15 +221,22 @@ class LLMAgent:
         self.llama_model = None
         self.vllm_engine = None
 
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
+        default_base_url = "https://api.deepseek.com/v1" if (self.api_key and ("deepseek" in (base_url or "").lower() or os.getenv("DEEPSEEK_API_KEY"))) else "https://api.openai.com/v1"
+        self.base_url = (base_url or os.getenv("VLLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
+
         # Auto-detect local server if backend is auto/llama.cpp and no explicit model_path
         server_port = server_port or DEFAULT_SERVER_PORT
-        if self.backend in ("llama.cpp", "auto") and not model_path and is_local_server_running(port=server_port):
+        if self.backend in ("llama.cpp", "auto") and not model_path and not self.api_key and is_local_server_running(port=server_port):
             self.logger.log("INFO", f"Detected running llama.cpp server on :{server_port}, connecting via HTTP...")
             self.backend = "openai"
             base_url = f"http://localhost:{server_port}/v1"
 
+        # Initialize local models ONLY IF no external API key is configured, OR if explicitly requested via backend="llama.cpp" / "vllm"
+        should_init_local = (self.backend in ("llama.cpp", "vllm")) or (self.backend == "auto" and not self.api_key)
+
         # Check vLLM backend direct load
-        if self.backend in ("vllm", "auto") and not self.llama_model:
+        if should_init_local and self.backend in ("vllm", "auto") and not self.llama_model:
             vllm_target = self.model_path or (REPO_ROOT if os.path.exists(os.path.join(REPO_ROOT, "Qwen3-4B", "config.json")) else None)
             if vllm_target or self.backend == "vllm":
                 try:
@@ -247,7 +254,7 @@ class LLMAgent:
                     self.logger.log("ERROR", f"Failed to initialize vLLM engine: {str(e)}")
 
         # Check llama.cpp backend load
-        if self.backend in ("llama.cpp", "auto") and not self.vllm_engine:
+        if should_init_local and self.backend in ("llama.cpp", "auto") and not self.vllm_engine:
             if not self.model_path:
                 self.model_path = find_default_model_path()
 
@@ -276,13 +283,30 @@ class LLMAgent:
                             self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
                     except Exception as e:
                         self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
-
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
         default_base_url = "https://api.deepseek.com/v1" if (self.api_key and "deepseek" in (base_url or "").lower()) or os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
         self.base_url = (base_url or os.getenv("VLLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
 
         default_model = "qwen3" if (self.llama_model or self.vllm_engine) else ("deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o")
         self.model = model or os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("DEEPSEEK_MODEL") or default_model
+        self._init_http_session()
+
+    def _init_http_session(self):
+        try:
+            import requests
+            from requests.adapters import HTTPAdapter
+            from urllib3.util import Retry
+            self.session = requests.Session()
+            retries = Retry(
+                total=3,
+                backoff_factor=0.5,
+                status_forcelist=[429, 500, 502, 503, 504],
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+            self.session.mount("https://", adapter)
+            self.session.mount("http://", adapter)
+        except Exception as e:
+            self.session = None
 
     def is_api_configured(self) -> bool:
         return (self.vllm_engine is not None) or (self.llama_model is not None) or bool(self.api_key)
@@ -305,6 +329,19 @@ class LLMAgent:
             "max_tokens": 8192,
         }
         self.logger.log("INFO", f"Calling external LLM API at {self.base_url} model={payload['model']}...")
+        if getattr(self, "session", None) is not None:
+            try:
+                resp = self.session.post(url, json=payload, headers=headers, timeout=120)
+                if resp.status_code != 200:
+                    self.logger.log("ERROR", f"LLM API HTTPError {resp.status_code}: {resp.text}")
+                    raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+                result = resp.json()
+                return result["choices"][0]["message"]["content"]
+            except Exception as e:
+                if "HTTP" in str(e):
+                    raise
+                self.logger.log("WARNING", f"requests session call failed ({e}), falling back to urllib...")
+
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
@@ -389,17 +426,26 @@ class LLMAgent:
 
     def extract_multi_code_blocks(self, llm_response: str) -> Dict[str, str]:
         candidates = {}
-        pattern = r"\[VARIANT_(\d+)\].*?```java\s*\n(.*?)\n```"
-        matches = re.findall(pattern, llm_response, re.DOTALL)
+        # 1. Flexible regex for [VARIANT_1], [VARIANT 1], Variant 1, **VARIANT_1**, etc.
+        pattern = r"(?:\[?VARIANT[_\s]*(\d+)\]?|Variant\s*(\d+)).*?```(?:java)?\s*\n(.*?)\n```"
+        matches = re.findall(pattern, llm_response, re.DOTALL | re.IGNORECASE)
         if matches:
-            for idx, code in matches:
-                clean = re.sub(r"^\[VARIANT_\d+\].*", "", code).strip()
-                candidates[f"v{idx}"] = clean
-        else:
-            blocks = re.findall(r"```java\s*\n(.*?)\n```", llm_response, re.DOTALL)
+            for m in matches:
+                idx = m[0] or m[1]
+                code = m[2].strip()
+                clean = re.sub(r"^\[?VARIANT[_\s]*\d+\]?.*", "", code, flags=re.IGNORECASE).strip()
+                if clean:
+                    candidates[f"v{idx}"] = clean
+
+        # 2. Fallback: extract ALL ```java ... ``` or ``` ... ``` code blocks in order
+        if len(candidates) < 3:
+            blocks = re.findall(r"```(?:java)?\s*\n(.*?)\n```", llm_response, re.DOTALL)
             for idx, code in enumerate(blocks, start=1):
-                clean = re.sub(r"^\[VARIANT_\d+\].*", "", code).strip()
-                candidates[f"v{idx}"] = clean
+                key = f"v{idx}"
+                if key not in candidates:
+                    clean = re.sub(r"^\[?VARIANT[_\s]*\d+\]?.*", "", code, flags=re.IGNORECASE).strip()
+                    if clean and len(clean) > 10:
+                        candidates[key] = clean
 
         if not candidates:
             single = self.extract_code_block(llm_response)

@@ -2,6 +2,7 @@
 
 import os
 import re
+import concurrent.futures
 from typing import Dict, List, Any, Optional
 
 from burn_job.detectors._shared import REPO_ROOT, read_file
@@ -23,6 +24,9 @@ _STRATEGY_NAMES = {
 
 _DEFAULT_NAMES = ["Declarative Spring Data Projection", "Upfront Bulk Query & Map Lookup", "Low-Overhead Primitive Structures"]
 
+# Phase 2 Optimization: In-memory Candidate Cache
+_CANDIDATE_CACHE: Dict[str, Dict[str, str]] = {}
+
 
 def _pick_strategy_names(tax_codes: List[str]) -> List[str]:
     for tc in tax_codes:
@@ -35,24 +39,55 @@ def _score_from_complexity(code: str) -> float:
     return score_candidate(code, analyze_complexity(code))
 
 
-def generate_and_evaluate_variants(
+def _quick_syntax_check(code: str) -> bool:
+    """Fast in-memory Java syntax pre-validation to avoid expensive disk/mvn execution."""
+    if not code or len(code.strip()) < 15:
+        return False
+    braces = 0
+    parens = 0
+    for char in code:
+        if char == '{':
+            braces += 1
+        elif char == '}':
+            braces -= 1
+        elif char == '(':
+            parens += 1
+        elif char == ')':
+            parens -= 1
+        if braces < 0 or parens < 0:
+            return False
+    if braces != 0 or parens != 0:
+        return False
+    if not any(k in code for k in ("class ", "interface ", "record ", "void ", "return", "import ")):
+        return False
+    return True
+
+
+def _make_cache_key(finding: Dict[str, Any], target_file: str, original_code: str) -> str:
+    tax = tuple(sorted(finding.get("pdf_taxonomy", ["T1"])))
+    mech = finding.get("mechanism", "")
+    return f"{target_file}:{tax}:{mech}:{hash(original_code)}"
+
+
+def fetch_candidate_codes_from_llm(
     finding: Dict[str, Any],
     original_code: str,
     target_file: str,
     agent: Optional[Any] = None,
-    verify_compile: bool = False,
     variant_llm: str = "local",
-) -> List[Dict[str, Any]]:
-    tax_codes = finding.get("pdf_taxonomy", ["T1"])
-    names = _pick_strategy_names(tax_codes)
-    variants = []
+) -> Dict[str, str]:
+    if not (agent and agent.is_api_configured()):
+        return {}
 
-    candidate_codes: Dict[str, str] = {}
-    if agent and agent.is_api_configured():
-        try:
-            from burn_job.refinement.agent import SYSTEM_MULTI_VARIANT_PROMPT
-            rel_file = os.path.relpath(target_file, REPO_ROOT)
-            prompt = f"""Target File: {rel_file}
+    cache_key = _make_cache_key(finding, target_file, original_code)
+    if cache_key in _CANDIDATE_CACHE:
+        return _CANDIDATE_CACHE[cache_key]
+
+    try:
+        from burn_job.refinement.agent import SYSTEM_MULTI_VARIANT_PROMPT
+        tax_codes = finding.get("pdf_taxonomy", ["T1"])
+        rel_file = os.path.relpath(target_file, REPO_ROOT)
+        prompt = f"""Target File: {rel_file}
 Taxonomy Codes: {tax_codes}
 Mechanism: {finding.get('mechanism', '')}
 
@@ -60,15 +95,36 @@ Existing Code:
 ```java
 {original_code}
 ```
-Generate 3 distinct refactoring candidates per multi-variant instructions."""
-            if variant_llm == "deepseek" and agent.api_key:
-                deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-                resp = agent.call_llm_api(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT, model=deepseek_model)
-            else:
-                resp = agent.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
-            candidate_codes = agent.extract_multi_code_blocks(resp)
-        except Exception as e:
-            pass
+Generate EXACTLY 3 distinct refactoring candidate implementations. Label each variant with [VARIANT_1], [VARIANT_2], and [VARIANT_3]."""
+        if variant_llm == "deepseek" and agent.api_key:
+            deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+            resp = agent.call_llm_api(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT, model=deepseek_model)
+        else:
+            resp = agent.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
+        blocks = agent.extract_multi_code_blocks(resp)
+        _CANDIDATE_CACHE[cache_key] = blocks
+        return blocks
+    except Exception:
+        return {}
+
+
+def generate_and_evaluate_variants(
+    finding: Dict[str, Any],
+    original_code: str,
+    target_file: str,
+    agent: Optional[Any] = None,
+    verify_compile: bool = False,
+    variant_llm: str = "local",
+    prefetched_candidates: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    tax_codes = finding.get("pdf_taxonomy", ["T1"])
+    names = _pick_strategy_names(tax_codes)
+    variants = []
+
+    if prefetched_candidates is not None:
+        candidate_codes = prefetched_candidates
+    else:
+        candidate_codes = fetch_candidate_codes_from_llm(finding, original_code, target_file, agent=agent, variant_llm=variant_llm)
 
     for i, name in enumerate(names):
         code = candidate_codes.get(f"v{i+1}", original_code)
@@ -87,14 +143,18 @@ Generate 3 distinct refactoring candidates per multi-variant instructions."""
             entry["errors"].append(f"complexity_score_failed: {e}")
 
         if verify_compile and code != original_code:
-            with open(target_file, "w", encoding="utf-8") as f:
-                f.write(code)
-            try:
-                entry["compiles"] = verify_compilation(target_file)
-            except Exception:
+            if not _quick_syntax_check(code):
                 entry["compiles"] = False
-            with open(target_file, "w", encoding="utf-8") as f:
-                f.write(original_code)
+                entry["errors"].append("fast_syntax_precheck_failed")
+            else:
+                with open(target_file, "w", encoding="utf-8") as f:
+                    f.write(code)
+                try:
+                    entry["compiles"] = verify_compilation(target_file)
+                except Exception:
+                    entry["compiles"] = False
+                with open(target_file, "w", encoding="utf-8") as f:
+                    f.write(original_code)
 
         entry["score"] = entry["score_ast"] if entry["score_ast"] is not None else 0
         variants.append(entry)
@@ -112,8 +172,9 @@ def attach_variant_comparisons(
     agent: Optional[Any] = None,
     verify_compile: bool = False,
     variant_llm: str = "local",
+    max_workers: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    enriched = []
+    prepared_items = []
     for f in findings:
         target_file = None
         rel_file = f.get("file", "")
@@ -129,9 +190,31 @@ def attach_variant_comparisons(
             except Exception:
                 pass
 
+        prepared_items.append((f, target_file, original_code))
+
+    candidates_by_index: Dict[int, Dict[str, str]] = {}
+    if agent and agent.is_api_configured() and prepared_items:
+        concurrency = max_workers or int(os.getenv("DEEPSEEK_CONCURRENCY", os.getenv("LLM_MAX_WORKERS", "8")))
+        workers = max(1, min(concurrency, len(prepared_items)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_idx = {
+                executor.submit(fetch_candidate_codes_from_llm, f, orig_code, t_file, agent, variant_llm): idx
+                for idx, (f, t_file, orig_code) in enumerate(prepared_items)
+                if orig_code and t_file
+            }
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    candidates_by_index[idx] = future.result()
+                except Exception:
+                    candidates_by_index[idx] = {}
+
+    enriched = []
+    for idx, (f, target_file, original_code) in enumerate(prepared_items):
         if original_code and target_file:
+            candidates = candidates_by_index.get(idx)
             variants = generate_and_evaluate_variants(
-                f, original_code, target_file, agent=agent, verify_compile=verify_compile, variant_llm=variant_llm,
+                f, original_code, target_file, agent=agent, verify_compile=verify_compile, variant_llm=variant_llm, prefetched_candidates=candidates
             )
         else:
             names = _pick_strategy_names(f.get("pdf_taxonomy", ["T1"]))
@@ -141,9 +224,16 @@ def attach_variant_comparisons(
         winner = next((v for v in variants if v.get("is_winner")), (variants[0] if variants else None))
 
         llm_model = getattr(agent, "model", None) if agent else None
+        orig_score = None
+        if original_code:
+            try:
+                orig_score = round(_score_from_complexity(original_code), 2)
+            except Exception:
+                pass
 
         enriched.append({
             **f,
+            "original_score": orig_score,
             "variants": variants,
             "winner": winner,
             "benchmark": None,

@@ -228,10 +228,11 @@ BURN_JOB_PROFILE_PATH=./app_profiling_full.collapsed
 # Активировать виртуальное окружение (если ещё не активировано)
 source .venv/bin/activate
 
-# Запустить полный цикл оптимизации с внешним DeepSeek
-# --backend openai  — используем OpenAI-совместимый API (DeepSeek совместим с форматом OpenAI)
-# --online          — разрешаем внешние API-вызовы (без этого флага DeepSeek не будет вызван)
-./run.sh run-cycle --backend openai --online
+# Полный запуск цикла оптимизации с использованием внешнего DeepSeek (8 параллельных воркеров):
+burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
+
+# Мгновенный анализ (с пропуском бенчмаркинга Spring Boot и оценкой по AST-сложности):
+burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
 ```
 
 **Что произойдёт внутри (подробно):**
@@ -296,14 +297,17 @@ cat reports/sandbox/findings.json
 
 ---
 
-### Полный список команд `run.sh`
+### Полный список команд `burn-job`
 
 ```bash
-# Запустить полный цикл с DeepSeek (рекомендуется)
-./run.sh run-cycle --backend openai --online
+# Запустить полный цикл с внешним DeepSeek (8 параллельных воркеров):
+burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
+
+# Запустить быстрый анализ без бенчмаркинга Spring Boot:
+burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
 
 # Запустить с автоматическим применением исправлений в код (внимание: изменяет Java-файлы!)
-./run.sh run-cycle --apply --backend openai --online
+burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --apply
 
 # Только сканирование REST-эндпоинтов (без генерации кода и бенчмарков)
 ./run.sh scan

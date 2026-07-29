@@ -6,6 +6,7 @@ import json
 import subprocess
 import time
 import urllib.request
+import concurrent.futures
 from typing import Dict, Any, List, Optional
 
 from burn_job.core.config import (
@@ -24,7 +25,7 @@ from burn_job.graph.store import KuzuGraphStore
 from burn_job.detectors.orchestrate import analyze_anomalies
 from burn_job.detectors.variant_comparison import attach_variant_comparisons
 from burn_job.report.builder import build_findings_from_anomalies, build_schema_report
-from burn_job.report.detailed_reporter import generate_markdown_report, print_findings_summary
+from burn_job.report.detailed_reporter import generate_markdown_report, generate_html_report, print_findings_summary
 from burn_job.refinement.iterative_loop import run_iterative_loop
 
 logger = setup_logger("Orchestrator")
@@ -46,6 +47,8 @@ class AutonomousOrchestrator:
         backend: str = "auto",
         server_port: int = None,
         variant_llm: str = "deepseek",
+        max_workers: int = 8,
+        skip_benchmark: bool = False,
     ):
         self.src_dir = src_dir
         self.db_path = db_path
@@ -58,11 +61,16 @@ class AutonomousOrchestrator:
         self.model_path = model_path
         self.backend = backend
         self.variant_llm = variant_llm
+        self.max_workers = max_workers
+        self.skip_benchmark = skip_benchmark
         self.graph_store = KuzuGraphStore(db_path)
         from burn_job.refinement.agent import LLMAgent
 
         env_model_path = model_path or os.getenv("BURN_JOB_MODEL_PATH") or os.getenv("LLAMA_CPP_MODEL_PATH")
-        env_backend = backend if backend != "auto" else os.getenv("BURN_JOB_BACKEND", "auto")
+        if variant_llm in ("deepseek", "openai") and backend == "auto":
+            env_backend = variant_llm
+        else:
+            env_backend = backend if backend != "auto" else os.getenv("BURN_JOB_BACKEND", "auto")
         has_model_or_api = (
             env_model_path
             or os.getenv("DEEPSEEK_API_KEY")
@@ -107,23 +115,22 @@ class AutonomousOrchestrator:
     def _benchmark_with_micrometer(self, endpoint_path: str, warmup: int = 50, measure: int = 500) -> Dict[str, float]:
         full_url = f"{self.host}{endpoint_path}"
 
-        for _ in range(warmup):
+        def _fire_req():
             try:
                 with urllib.request.urlopen(full_url, timeout=5):
                     pass
             except Exception:
                 pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(lambda _: _fire_req(), range(warmup)))
 
         before = self._read_micrometer_metric(endpoint_path)
         if not before:
             return {"error": "micrometer_before_unavailable"}
 
-        for _ in range(measure):
-            try:
-                with urllib.request.urlopen(full_url, timeout=5):
-                    pass
-            except Exception:
-                pass
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(lambda _: _fire_req(), range(measure)))
 
         after = self._read_micrometer_metric(endpoint_path)
         if not after:
@@ -154,6 +161,10 @@ class AutonomousOrchestrator:
         return None
 
     def _benchmark_variants(self, findings: List[Dict[str, Any]], endpoints: List = None) -> List[Dict[str, Any]]:
+        if getattr(self, "skip_benchmark", False):
+            logger.info("Skipping live Spring Boot variant benchmarking (--skip-benchmark active). Winner selected by AST complexity score.")
+            return findings
+
         logger.info("Benchmarking LLM-generated variants...")
         project_dir = self._find_project_dir()
         if not project_dir:
@@ -177,9 +188,37 @@ class AutonomousOrchestrator:
                         endpoint_path = ep.path
                         break
 
+            # Benchmark baseline original code
+            try:
+                self._kill_app_on_port()
+                app_proc = subprocess.Popen(
+                    ["mvn", "spring-boot:run", "-q"], cwd=project_dir,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                started = self._wait_for_app()
+                if started:
+                    time.sleep(1)
+                    bm_base = self._benchmark_with_micrometer(endpoint_path)
+                    if bm_base and bm_base.get("avg_s") is not None:
+                        finding["baseline_benchmark"] = bm_base
+                        logger.info(f"  Baseline (original code): avg={bm_base['avg_s']}s max={bm_base['max_s']}s ({bm_base.get('count')} reqs)")
+                app_proc.terminate()
+                try:
+                    app_proc.wait(timeout=15)
+                except Exception:
+                    app_proc.kill()
+                self._kill_app_on_port()
+            except Exception as e:
+                logger.warning(f"  Baseline benchmark note: {e}")
+                self._kill_app_on_port()
+
             for variant in finding.get("variants", []):
                 code = variant.get("generated_code")
                 if not code:
+                    continue
+                if variant.get("compiles") is False:
+                    logger.info(f"  Skipping benchmark for '{variant.get('strategy')}': variant fails compilation")
+                    variant["benchmark"] = {"error": "compilation_failed_precheck"}
                     continue
 
                 with open(abs_file, "w", encoding="utf-8") as f:
@@ -290,12 +329,19 @@ class AutonomousOrchestrator:
         logger.info("Attaching variant comparisons with AST scoring...")
         project_dir = self._find_project_dir()
         verify_compile = project_dir is not None and not self.offline
-        findings = attach_variant_comparisons(findings, agent=self.agent, verify_compile=verify_compile, variant_llm=self.variant_llm)
+        findings = attach_variant_comparisons(
+            findings,
+            agent=self.agent,
+            verify_compile=verify_compile,
+            variant_llm=self.variant_llm,
+            max_workers=self.max_workers,
+        )
 
         findings = self._benchmark_variants(findings, endpoints)
 
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
         detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")
+        detailed_html_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.html")
 
         report = build_schema_report("sandbox", "hard", findings, checked_not_issue)
         os.makedirs(os.path.dirname(findings_json_path) or ".", exist_ok=True)
@@ -303,7 +349,8 @@ class AutonomousOrchestrator:
             json.dump(report, f, ensure_ascii=False, indent=2)
 
         generate_markdown_report(findings, checked_not_issue, detailed_md_path)
-        logger.info(f"Exported {len(findings)} findings to {findings_json_path} and {detailed_md_path}")
+        generate_html_report(findings, checked_not_issue, detailed_html_path)
+        logger.info(f"Exported {len(findings)} findings to {findings_json_path}, {detailed_md_path}, and {detailed_html_path}")
 
         # STEP 6 & 7: LLM Refactoring Self-Optimization Loop
         modified_files = 0
