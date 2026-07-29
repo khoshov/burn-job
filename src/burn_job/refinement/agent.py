@@ -43,19 +43,26 @@ RULES:
 
 SYSTEM_MULTI_VARIANT_PROMPT = SYSTEM_PROMPT + """
 MULTI-VARIANT INSTRUCTIONS:
-Please generate EXACTLY 3 DISTINCT complete refactored Java file candidate implementations for the bottleneck, labeled clearly as:
-[VARIANT_1]
+Please generate EXACTLY 3 DISTINCT complete refactored Java file candidate implementations targeting different optimization strategies:
+
+[VARIANT_1] (Spring Data / Declarative Projection Strategy):
+Use Spring Data JPA interface projections, Record DTO constructor expressions (SELECT new ...), or @EntityGraph JOIN FETCH.
 ```java
-// Complete Java file 1 with package, imports, and public class ...
+// Complete Java file Variant 1 with package, imports, and public class ...
 ```
-[VARIANT_2]
+
+[VARIANT_2] (Batching & Upfront Map Lookup Strategy):
+Use upfront bulk querying (findAllById / repository.findAll), in-memory HashMap/HashSet indexing, and batch operations (saveAll).
 ```java
-// Complete Java file 2 with package, imports, and public class ...
+// Complete Java file Variant 2 with package, imports, and public class ...
 ```
-[VARIANT_3]
+
+[VARIANT_3] (Low-Overhead / Primitive & Cached Constant Strategy):
+Use low-overhead primitive data structures, static final Pattern compilation, and zero-allocation buffers.
 ```java
-// Complete Java file 3 with package, imports, and public class ...
+// Complete Java file Variant 3 with package, imports, and public class ...
 ```
+
 CRITICAL RULE:
 Each variant MUST be a COMPLETE, compilable Java source file containing the package declaration, all imports, and the full public class definition.
 """

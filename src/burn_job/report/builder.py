@@ -39,29 +39,49 @@ ANOMALY_TYPE_TO_TAXONOMY_CODES = {
 }
 
 FIX_SUGGESTIONS = {
-    "SAVE_IN_LOOP_UNBATCHED": "Accumulate the entities and persist them in one batched call (e.g. saveAll with JDBC batching enabled) instead of saving one at a time inside the loop.",
-    "EXCESSIVE_STRING_CONCAT": "Reuse a single StringBuilder outside the loop instead of repeated concatenation, or avoid building the string at all if it is not used every iteration.",
-    "LINEAR_SEARCH_IN_LOOP": "Replace the linear List.contains/indexOf lookup with a Set or Map keyed for O(1) membership checks.",
-    "QUADRATIC_NESTED_LOOP": "Precompute a lookup structure (Set/Map) before the outer loop instead of scanning the inner collection on every iteration.",
-    "HEAVY_ENTITY_FETCH": "Fetch only the fields actually needed via a projection/DTO instead of loading the full managed entity.",
-    "FULL_FETCH_FOR_EXISTENCE_CHECK": "Replace the full fetch with an existsBy...()/COUNT query that never materializes the entity.",
-    "BOXED_WRAPPER_OVERHEAD": "Use primitive collections/arrays where possible to avoid per-element boxing allocation.",
-    "ARRAY_ALLOCATION_PRESSURE": "Reuse or pre-size the buffer instead of repeatedly reallocating large arrays.",
-    "DEAD_OR_UNREACHABLE_CODE": "Remove the unreachable code path, or add a test/entry point that actually exercises it if it is still needed.",
-    "DUPLICATE_LAYER_VALIDATION": "Consolidate the repeated check into a single layer instead of validating the same condition at every call site.",
-    "CODE_STYLE_FORMATTING": "No functional fix needed - this is a style-only observation.",
-    "N_PLUS_ONE_QUERIES": "Use JOIN FETCH or an @EntityGraph to load the association in the same query instead of triggering N lazy-loads.",
-    "CONNECTION_POOL_STARVATION": "Increase the pool size or shorten held-connection time so waiters are not blocked on exhaustion.",
-    "RETAINED_OBJECT_ACCUMULATION": "Ensure the referenced objects are released/evicted - check for a missing bound on how long they are retained.",
-    "UNBOUNDED_CACHE_OR_COLLECTION_GROWTH": "Bound the collection with a max size and eviction policy (e.g. an LRU cache) instead of growing it unconditionally.",
-    "IN_MEMORY_FILTERING": "Push the filter/pagination down to the database query (WHERE/LIMIT) instead of loading everything into memory first.",
-    "EXCESSIVE_STRING_ALLOCATIONS": "Reduce string churn - reuse a StringBuilder or avoid intermediate string creation in the hot path.",
-    "BOUNDED_REQUEST_COLLECTION": "No fix needed - the collection size is already bounded by the request contract.",
-    "THREAD_LOCK_CONTENTION": "Shrink the critical section, or replace the lock with a finer-grained/lock-free alternative if contention is the bottleneck.",
-    "CPU_HOTSPOT_METHOD": "Profile this method further and optimize its hot path (algorithmic change or caching) since it dominates CPU time.",
-    "MICROBENCHMARK_REGEX_COMPILE": "Compile the Pattern once (e.g. as a static final field) instead of recompiling it on every call.",
+    # T1: Redundant Operations
+    "SAVE_IN_LOOP_UNBATCHED": "Accumulate entities in a list and persist them in a single batched call (repository.saveAll) with hibernate.jdbc.batch_size enabled, or use a single native batch INSERT query.",
+    "REPEATED_DB_LOOKUP_IN_LOOP": "Query all required keys upfront using repository.findAllById(keySet) into a Map<ID, Entity> lookup table before entering the loop to eliminate repeated database round-trips.",
+    "EXCESSIVE_STRING_CONCAT": "Replace repeated string concatenation in loops with a single StringBuilder, String.join(), or pre-allocated buffer.",
+    
+    # T2: Inefficient Algorithms
+    "LINEAR_SEARCH_IN_LOOP": "Pre-index the collection into a HashSet or HashMap before the loop to reduce lookup complexity from O(N) linear scans to O(1) constant-time checks.",
+    "QUADRATIC_NESTED_LOOP": "Build an in-memory Map<Key, List<Entity>> index before the outer loop to transform O(N * M) quadratic nested loops into O(N + M) linear-time execution.",
+    "UNSORTED_STREAM_REPEATED_SORT": "Perform sorting once at the data query layer (ORDER BY) or use a TreeSet/PriorityQueue instead of sorting repeatedly inside hot streams.",
+
+    # T3: Heavy Materialization & Projections
+    "HEAVY_ENTITY_FETCH": "Replace full JPA @Entity materialization with Spring Data Interface Projections or Record DTOs (SELECT new ru.package.RecordDTO(...)) to fetch only the required fields.",
+    "FULL_FETCH_FOR_EXISTENCE_CHECK": "Replace full entity/collection fetches with repository.existsById() or COUNT queries that do not materialize entities into the JVM heap.",
+
+    # T4: Data Layout & Memory Overhead
+    "BOXED_WRAPPER_OVERHEAD": "Use primitive arrays (int[], long[]) or specialized primitive collections (FastUtil/Eclipse Collections) to eliminate per-element object wrapper overhead.",
+    "ARRAY_ALLOCATION_PRESSURE": "Pre-size collections to target capacity or reuse thread-local buffers to eliminate array reallocation churn.",
+
+    # T5: Dead Code & Redundant Checks
+    "DEAD_OR_UNREACHABLE_CODE": "Prune dead or unreachable branches while preserving existing public API contract behavior.",
+    "DUPLICATE_LAYER_VALIDATION": "Consolidate multi-layer validation checks into a single domain assertion at the entry layer.",
+    "CODE_STYLE_FORMATTING": "No functional fix required - formatting and style observation only.",
+
+    # T6: Database Bottlenecks
+    "N_PLUS_ONE_QUERIES": "Use @EntityGraph(attributePaths = {...}) or JOIN FETCH in JPQL/HQL queries to load associations in a single SQL query instead of triggering N lazy loads.",
+    "CONNECTION_POOL_STARVATION": "Optimize long-running queries, shorten transaction boundaries (@Transactional), or increase HikariCP connection pool size.",
+    "PAGINATION_MEMORY_LEAK": "Use database-level pagination (Pageable / LIMIT offset) or Seek/Keyset pagination instead of pulling full result sets into memory.",
+
+    # T7: Memory Leaks
+    "RETAINED_OBJECT_ACCUMULATION": "Evict unreferenced items from long-lived collections or clear ThreadLocal variables after request completion.",
+    "UNBOUNDED_CACHE_OR_COLLECTION_GROWTH": "Replace unbounded maps with a Caffeine LRU cache configured with maximumSize and expireAfterWrite policies.",
+
+    # T8: Heap Memory Overhead
+    "IN_MEMORY_FILTERING": "Push Stream filtering and pagination conditions down to the database query level (WHERE clause) instead of filtering in JVM memory.",
+    "EXCESSIVE_STRING_ALLOCATIONS": "Reduce string object allocation churn in hot execution paths by reusing static pattern matchers or character buffers.",
+
+    # T9: CPU Hotspots
+    "CPU_HOTSPOT_METHOD": "Optimize the hot-path method by applying algorithmic memoization, caching, or reducing unnecessary object allocations.",
+    "MICROBENCHMARK_REGEX_COMPILE": "Extract Pattern.compile(...) out of the method body into a private static final Pattern constant.",
+    "THREAD_LOCK_CONTENTION": "Shrink synchronized critical sections or replace coarse locks with ConcurrentHashMap / Lock-free atomic primitives.",
+    "BOUNDED_REQUEST_COLLECTION": "No fix needed - collection capacity is bounded by API request contract.",
 }
-DEFAULT_FIX_SUGGESTION = "Investigate the mechanism described above and address it at the identified call site."
+DEFAULT_FIX_SUGGESTION = "Investigate the mechanism described above and apply a targeted Spring Data / Java 21 optimization variant."
 
 
 def generate_burn_job_report():
