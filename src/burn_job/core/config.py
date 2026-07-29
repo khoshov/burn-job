@@ -56,7 +56,7 @@ DEFAULT_MODEL_PATH = os.environ.get(
     "BURN_JOB_MODEL_PATH",
     os.environ.get("LLAMA_CPP_MODEL_PATH", os.path.join(REPO_ROOT, "Qwen3-4B", "qwen3-4b-instruct.gguf"))
 )
-DEFAULT_N_CTX = int(os.environ.get("BURN_JOB_N_CTX", "8192"))
+DEFAULT_N_CTX = int(os.environ.get("BURN_JOB_N_CTX", "16384"))
 DEFAULT_N_GPU_LAYERS = int(os.environ.get("BURN_JOB_N_GPU_LAYERS", "-1"))
 
 @dataclass

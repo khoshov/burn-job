@@ -13,6 +13,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 
+from burn_job.core.config import DEFAULT_N_CTX
 from burn_job.refinement.evaluator import evaluate_variant_candidates, JFRProfiler
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -201,19 +202,13 @@ class LLMAgent:
         base_url: str = None,
         model_path: str = None,
         backend: str = None,
-        n_ctx: int = 8192,
+        n_ctx: int = DEFAULT_N_CTX,
         n_gpu_layers: int = -1,
         logger: LLMAgentLogger = None,
-        quick: bool = False,
         server_port: int = None,
     ):
         self.logger = logger or LLMAgentLogger()
         self.backend = (backend or os.getenv("BURN_JOB_BACKEND") or "auto").lower()
-        self.quick = quick
-
-        if quick:
-            n_ctx = min(n_ctx, 2048)
-            self.logger.log("INFO", f"Quick mode: n_ctx={n_ctx}")
 
         self.model_path = (
             model_path
@@ -293,7 +288,7 @@ class LLMAgent:
         return (self.vllm_engine is not None) or (self.llama_model is not None) or bool(self.api_key)
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
-        max_tokens = 1024 if self.quick else 4096
+        max_tokens = 4096
 
         if self.vllm_engine is not None:
             self.logger.log("INFO", "Executing inference via local python vLLM engine...")
@@ -555,7 +550,6 @@ def main():
     parser.add_argument("--n-gpu-layers", type=int, default=-1, help="Number of GPU layers to offload (-1 for all)")
     parser.add_argument("--api-key", help="API key for LLM provider")
     parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint (or vLLM server http://localhost:8000/v1)")
-    parser.add_argument("--quick", action="store_true", help="Fast mode: reduced context (2048), fewer tokens")
     parser.add_argument("--server-port", type=int, default=None, help="Port of a running llama.cpp server to connect to")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
@@ -593,7 +587,6 @@ def main():
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
         logger=logger,
-        quick=args.quick,
         server_port=args.server_port,
     )
 

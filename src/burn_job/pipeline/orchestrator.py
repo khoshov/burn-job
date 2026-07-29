@@ -42,7 +42,6 @@ class AutonomousOrchestrator:
         log_path: str = RUN_LOG_PATH,
         model_path: str = None,
         backend: str = "auto",
-        quick: bool = False,
         server_port: int = None,
     ):
         self.src_dir = src_dir
@@ -55,7 +54,6 @@ class AutonomousOrchestrator:
         self.log_path = log_path
         self.model_path = model_path
         self.backend = backend
-        self.quick = quick
         self.graph_store = KuzuGraphStore(db_path)
         from burn_job.refinement.agent import LLMAgent
 
@@ -67,7 +65,7 @@ class AutonomousOrchestrator:
             or os.getenv("OPENAI_API_KEY")
             or os.getenv("LLM_API_KEY")
         )
-        self.agent = LLMAgent(model_path=env_model_path, backend=env_backend, quick=quick, server_port=server_port) if (
+        self.agent = LLMAgent(model_path=env_model_path, backend=env_backend, server_port=server_port) if (
             not offline or has_model_or_api or env_backend in ("vllm", "llama.cpp")
         ) else None
 

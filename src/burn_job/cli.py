@@ -96,14 +96,12 @@ def run_cycle(
     online: bool = typer.Option(False, "--online", help="Enable online LLM API calls"),
     model_path: Optional[str] = typer.Option(None, "--model-path", help="Path to local model file/directory (llama.cpp or vLLM)"),
     backend: BackendEnum = typer.Option(BackendEnum.auto, "--backend", help="LLM execution backend (auto, llama.cpp, vllm, openai)"),
-    quick: bool = typer.Option(False, "--quick", help="Fast mode: reduced context (2048), fewer tokens, skip non-essential steps"),
     server_port: Optional[int] = typer.Option(None, "--server-port", help="Connect to running llama.cpp server on port (overrides auto-detect)"),
 ):
     mode_str = "[green]APPLY FIXES MODE[/green]" if apply else "[yellow]REPORT ONLY MODE (No code modified)[/yellow]"
-    quick_str = " [red][QUICK][/red]" if quick else ""
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
-        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]{quick_str}",
+        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]",
         title="[bold green]Starting Cycle[/bold green]"
     ))
     orchestrator = AutonomousOrchestrator(
@@ -115,7 +113,6 @@ def run_cycle(
         apply_fixes=apply,
         model_path=model_path,
         backend=backend.value,
-        quick=quick,
         server_port=server_port,
     )
     res = orchestrator.run()
