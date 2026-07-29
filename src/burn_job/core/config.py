@@ -29,7 +29,11 @@ def _load_env_file():
 _load_env_file()
 
 # Target source code directory
-DEFAULT_SRC_DIR = os.environ.get("BURN_JOB_SRC_DIR", os.path.join(REPO_ROOT, "java", "src", "main", "java"))
+AWRELIUS_SRC = "/Users/stanislavkhoshov/Documents/awrelius/src/main/java"
+DEFAULT_SRC_DIR = os.environ.get(
+    "BURN_JOB_SRC_DIR",
+    AWRELIUS_SRC if os.path.isdir(AWRELIUS_SRC) else os.path.join(REPO_ROOT, "java", "src", "main", "java")
+)
 
 # Storage paths
 DEFAULT_DB_PATH = os.environ.get("BURN_JOB_DB_PATH", os.path.join(REPO_ROOT, "profiler_graph.db"))
