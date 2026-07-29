@@ -33,9 +33,14 @@ def _build_class_index(src_root: str) -> Dict[str, str]:
     return index
 
 
-@functools.lru_cache(maxsize=1)
-def _class_index() -> Dict[str, str]:
-    return _build_class_index(SRC_ROOT)
+@functools.lru_cache(maxsize=32)
+def get_class_index(src_root: str) -> Dict[str, str]:
+    return _build_class_index(src_root)
+
+
+def _class_index(src_root: Optional[str] = None) -> Dict[str, str]:
+    root = src_root or os.getenv("BURN_JOB_SRC_DIR") or SRC_ROOT
+    return get_class_index(root)
 
 
 @functools.lru_cache(maxsize=None)
@@ -139,9 +144,9 @@ def _parse_javap_line_table(class_fqn: str, method_name: str, classpath: str) ->
     return None
 
 
-def _resolve_method_in_class(class_fqn: str, method_name: str) -> Optional[Tuple[str, int, int]]:
+def _resolve_method_in_class(class_fqn: str, method_name: str, src_root: Optional[str] = None) -> Optional[Tuple[str, int, int]]:
     top_level_class = class_fqn.split("$")[0]
-    file_rel_path = _class_index().get(top_level_class)
+    file_rel_path = _class_index(src_root).get(top_level_class)
     if file_rel_path is None:
         return None
 
@@ -157,9 +162,9 @@ def _resolve_method_in_class(class_fqn: str, method_name: str) -> Optional[Tuple
     return file_rel_path, rng[0], rng[1]
 
 
-def _resolve_class_only(class_fqn: str) -> Optional[Tuple[str, int, int]]:
+def _resolve_class_only(class_fqn: str, src_root: Optional[str] = None) -> Optional[Tuple[str, int, int]]:
     top_level_class = class_fqn.split("$")[0]
-    file_rel_path = _class_index().get(top_level_class)
+    file_rel_path = _class_index(src_root).get(top_level_class)
     if file_rel_path is None:
         return None
     text = _read_source(file_rel_path)
@@ -171,7 +176,7 @@ def _resolve_class_only(class_fqn: str) -> Optional[Tuple[str, int, int]]:
 
 
 @functools.lru_cache(maxsize=None)
-def resolve_source_location(method_fqn: str) -> Optional[Tuple[str, int, int]]:
+def resolve_source_location(method_fqn: str, src_root: Optional[str] = None) -> Optional[Tuple[str, int, int]]:
     normalized = method_fqn.replace("/", ".")
     if "." not in normalized:
         return None
@@ -179,13 +184,13 @@ def resolve_source_location(method_fqn: str) -> Optional[Tuple[str, int, int]]:
 
     if _LAMBDA_CLASS_RE.search(class_fqn):
         enclosing_class = _LAMBDA_CLASS_RE.split(class_fqn)[0]
-        return _resolve_class_only(enclosing_class)
+        return _resolve_class_only(enclosing_class, src_root=src_root)
 
     lambda_method_match = _LAMBDA_METHOD_RE.match(method_name)
     if lambda_method_match:
         method_name = lambda_method_match.group(1)
 
-    return _resolve_method_in_class(class_fqn, method_name)
+    return _resolve_method_in_class(class_fqn, method_name, src_root=src_root)
 
 
 def main():

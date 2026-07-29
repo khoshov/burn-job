@@ -139,7 +139,10 @@ def _build_source_method_index() -> Dict[str, List[Tuple[str, int]]]:
 
 
 def _method_identity(anomaly: dict) -> str:
-    return f"{anomaly.get('type', '')}|{anomaly.get('callee', '')}"
+    caller = anomaly.get("caller", "")
+    callee = anomaly.get("callee", "")
+    atype = anomaly.get("type", "")
+    return f"{atype}|{caller}|{callee}"
 
 
 def _merge_dual_evidence(static_anomalies: List[dict],
@@ -181,18 +184,28 @@ def _merge_dual_evidence(static_anomalies: List[dict],
             )
             primary["confidence"] = compute_confidence(primary, static_match=True, graph_evidence=True)
             merged.append(primary)
+            for extra in graph_list[1:]:
+                extra["_dual_evidence"] = False
+                extra["_approaches"] = ["graph"]
+                extra["confidence"] = compute_confidence(extra, static_match=False, graph_evidence=True)
+                merged.append(extra)
+            for extra in static_list[1:]:
+                extra["_dual_evidence"] = False
+                extra["_approaches"] = ["static"]
+                extra["confidence"] = compute_confidence(extra, static_match=True, graph_evidence=False)
+                merged.append(extra)
         elif graph_list and not static_list:
-            a = graph_list[0]
-            a["_dual_evidence"] = False
-            a["_approaches"] = ["graph"]
-            a["confidence"] = compute_confidence(a, static_match=False, graph_evidence=True)
-            merged.append(a)
+            for a in graph_list:
+                a["_dual_evidence"] = False
+                a["_approaches"] = ["graph"]
+                a["confidence"] = compute_confidence(a, static_match=False, graph_evidence=True)
+                merged.append(a)
         elif static_list and not graph_list:
-            a = static_list[0]
-            a["_dual_evidence"] = False
-            a["_approaches"] = ["static"]
-            a["confidence"] = compute_confidence(a, static_match=True, graph_evidence=False)
-            merged.append(a)
+            for a in static_list:
+                a["_dual_evidence"] = False
+                a["_approaches"] = ["static"]
+                a["confidence"] = compute_confidence(a, static_match=True, graph_evidence=False)
+                merged.append(a)
     return merged
 
 
