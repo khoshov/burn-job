@@ -229,10 +229,10 @@ BURN_JOB_PROFILE_PATH=./app_profiling_full.collapsed
 source .venv/bin/activate
 
 # Полный запуск цикла оптимизации с использованием внешнего DeepSeek (8 параллельных воркеров):
-burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
+./run.sh run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
 
 # Мгновенный анализ (с пропуском бенчмаркинга Spring Boot и оценкой по AST-сложности):
-burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
+./run.sh run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
 ```
 
 **Что произойдёт внутри (подробно):**
@@ -301,13 +301,13 @@ cat reports/sandbox/findings.json
 
 ```bash
 # Запустить полный цикл с внешним DeepSeek (8 параллельных воркеров):
-burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
+./run.sh run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8
 
 # Запустить быстрый анализ без бенчмаркинга Spring Boot:
-burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
+./run.sh run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --skip-benchmark
 
 # Запустить с автоматическим применением исправлений в код (внимание: изменяет Java-файлы!)
-burn-job run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --apply
+./run.sh run-cycle --src test_project/src --db profiler_graph.db --profile app_profiling_full.collapsed --variant-llm deepseek --llm-workers 8 --apply
 
 # Только сканирование REST-эндпоинтов (без генерации кода и бенчмарков)
 ./run.sh scan
