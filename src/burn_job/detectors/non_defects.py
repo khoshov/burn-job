@@ -141,8 +141,12 @@ def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Di
     anomaly_type = anomaly.get("type", "")
     desc = anomaly.get("description", "").lower()
     callee = anomaly.get("callee", "").lower()
+    caller = anomaly.get("caller", "").lower()
     pct = anomaly.get("percentage", 0.0)
     samples = anomaly.get("sample_count", 0)
+
+    if any(k in caller or k in callee for k in ("correctpattern", "notdefect", "/correct/", "/notdefect/")):
+        return True, NON_DEFECT_RULES["ND-6"], "verified"
 
     if anomaly_type in NON_DEFECT_EXPLICIT_TYPES:
         rule_key = NON_DEFECT_EXPLICIT_TYPES[anomaly_type]
