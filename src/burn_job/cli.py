@@ -96,6 +96,60 @@ def ingest(
         raise typer.Exit(code=1)
 
 
+@app.command("detect", help="Run rule-based static & graph detection only (no LLM, no benchmarking, no report generation).")
+def detect(
+    src: str = typer.Option(DEFAULT_SRC_DIR, "--src", help="Path to Java source code directory"),
+    db: str = typer.Option(DEFAULT_DB_PATH, "--db", help="Path to KuzuDB database"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Path to collapsed or .jfr profile file to ingest before detection"),
+    output_json: Optional[str] = typer.Option(None, "--output", "-o", help="Optional output JSON path for raw findings"),
+):
+    import json
+    from burn_job.detectors.orchestrate import analyze_anomalies
+    from burn_job.report.builder import build_findings_from_anomalies
+
+    if profile and os.path.exists(profile):
+        from burn_job.utils.jfr_convert import jfr_to_collapsed
+        profile_path = profile
+        if profile_path.endswith(".jfr"):
+            try:
+                profile_path = jfr_to_collapsed(profile_path)
+            except Exception as e:
+                console.print(f"[bold red][✗] JFR conversion failed:[/bold red] {e}")
+                raise typer.Exit(code=1)
+        store = KuzuGraphStore(db)
+        store.ingest_profile(profile_path)
+
+    console.print(f"[bold cyan][*][/bold cyan] Running defect taxonomy detectors on [green]{src}[/green] and [yellow]{db}[/yellow]...")
+    anomalies = analyze_anomalies(db)
+    findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies)
+
+    if not findings:
+        console.print(Panel("[bold green]✓ No performance defects detected[/bold green]", title="Detection Summary"))
+        return
+
+    table = Table(title=f"Detected Performance Defects ({len(findings)})", show_header=True, header_style="bold magenta")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Taxonomy", style="cyan", width=10)
+    table.add_column("Location", style="green", width=35)
+    table.add_column("Impact", style="yellow", width=10)
+    table.add_column("Mechanism & Root Cause", style="white")
+
+    for idx, f in enumerate(findings, 1):
+        tax_str = ", ".join(f.get("pdf_taxonomy", ["T1"]))
+        loc_str = f"{os.path.basename(f.get('file', ''))}:{f.get('line_from', 1)}"
+        mech = f.get("mechanism", "").split("\n")[0][:100]
+        impact = f.get("impact", "MEDIUM")
+        table.add_row(str(idx), tax_str, loc_str, impact, mech)
+
+    console.print("\n", table)
+
+    if output_json:
+        os.makedirs(os.path.dirname(os.path.abspath(output_json)) or ".", exist_ok=True)
+        with open(output_json, "w", encoding="utf-8") as fp:
+            json.dump({"findings": findings, "checked_but_not_an_issue": checked_not_issue}, fp, ensure_ascii=False, indent=2)
+        console.print(f"\n[bold green][✓] Raw findings written to [yellow]{output_json}[/yellow][/bold green]")
+
+
 @app.command("run-cycle", help="Run full 8-step autonomous performance optimization cycle.")
 def run_cycle(
     src: str = typer.Option(DEFAULT_SRC_DIR, "--src", help="Path to Java source code directory"),
