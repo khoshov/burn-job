@@ -1,0 +1,23 @@
+{
+  "service": "sensorhub",
+  "version": "1.0.0",
+  "endpoints": [
+    "/api/stations",
+    "/api/stations/{code}",
+    "/api/stations/{code}/stats",
+    "/api/measurements",
+    "/api/measurements/{id}",
+    "/api/reports/daily",
+    "/api/reports/top",
+    "/api/reports/overview",
+    "/api/reports/snapshot",
+    "/api/export/samples.csv",
+    "/api/imports",
+    "/api/imports/{id}",
+    "/api/metric-types",
+    "/api/metric-types/{code}",
+    "/api/audit/recent",
+    "/api/filters/preview",
+    "/internal/reset"
+  ]
+}

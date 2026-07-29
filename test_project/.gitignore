@@ -1,0 +1,4 @@
+target/
+data/imports/
+*.log
+.DS_Store

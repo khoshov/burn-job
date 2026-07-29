@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: sensorhub
+  profiles:
+    default: dev
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        generate_statistics: true
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+        query:
+          plan_cache_max_size: 2048
+        session_factory:
+          statement_inspector: ru.hackathon.profiling.sensorhub.harness.SqlCountInspector
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  threads:
+    virtual:
+      enabled: false
+
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,threaddump,heapdump,env,configprops
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: sensorhub
+  observations:
+    annotations:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    ru.hackathon.profiling.sensorhub: INFO
+    org.hibernate.SQL: WARN
+
+app:
+  data-dir: data/imports
+  seed:
+    enabled: true
+    stations: 200
+    measurements-per-station: 5
+    raw-samples: 20000
+    metric-types: 12
+    import-rows: 500
+  job:
+    aggregation:
+      enabled: false
+      fixed-delay-ms: 1000
+  limits:
+    export-max-rows: 300000
+    export-default-rows: 20000
+    import-max-rows: 200000
+    page-max-size: 500
+    audit-window: 100
+    top-max-limit: 100
+    filters-max: 8
+  leak:
+    payload-bytes: 8192

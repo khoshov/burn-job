@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:55432/postgres?reWriteBatchedInserts=true
+    driver-class-name: org.postgresql.Driver
+    username: postgres
+    password: postgres
+
+app:
+  seed:
+    enabled: true
+    stations: 2000
+    measurements-per-station: 5
+    raw-samples: 20000
+    metric-types: 12
+    import-rows: 500
