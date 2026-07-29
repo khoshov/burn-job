@@ -65,7 +65,7 @@ _MATH_MIN_RE = re.compile(r"Math\.min\([^,()]+,\s*(\d+)\s*\)")
 _BOUND_THRESHOLD = 16
 
 
-def _resolve_any(value: str) -> Optional[Tuple[str, int, int]]:
+def _resolve_any(value: str, src_root: Optional[str] = None) -> Optional[Tuple[str, int, int]]:
     if not value:
         return None
     m = _FILE_LINE_RE.match(value)
@@ -73,17 +73,17 @@ def _resolve_any(value: str) -> Optional[Tuple[str, int, int]]:
         line = int(m.group(2))
         return m.group(1), line, line
     try:
-        return resolve_source_location(value)
+        return resolve_source_location(value, src_root=src_root)
     except Exception:
         return None
 
 
-def _verify_field_ordering(anomaly: Dict[str, Any]) -> Optional[bool]:
+def _verify_field_ordering(anomaly: Dict[str, Any], src_root: Optional[str] = None) -> Optional[bool]:
     if anomaly.get("type") != "WASTED_FIELD_PADDING":
         return None
     class_fqn = anomaly.get("callee", "")
     try:
-        file_rel_path = _class_index().get(class_fqn)
+        file_rel_path = _class_index(src_root).get(class_fqn)
         if not file_rel_path:
             return None
         simple_name = class_fqn.rsplit(".", 1)[-1]
@@ -94,14 +94,14 @@ def _verify_field_ordering(anomaly: Dict[str, Any]) -> Optional[bool]:
         return None
 
 
-def _verify_static_bound(anomaly: Dict[str, Any]) -> Optional[bool]:
+def _verify_static_bound(anomaly: Dict[str, Any], src_root: Optional[str] = None) -> Optional[bool]:
     anomaly_type = anomaly.get("type", "")
     desc = anomaly.get("description", "").lower()
     is_candidate = anomaly_type in ("QUADRATIC_NESTED_LOOP", "LINEAR_SEARCH_IN_LOOP") or "request" in desc
     if not is_candidate:
         return None
 
-    location = _resolve_any(anomaly.get("caller", ""))
+    location = _resolve_any(anomaly.get("caller", ""), src_root)
     if location is None:
         return None
     file_path, line_from, _ = location
@@ -137,7 +137,7 @@ NON_DEFECT_EXPLICIT_TYPES = {
 }
 
 
-def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Tuple[bool, Dict[str, Any], Optional[str]]:
+def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Dict[str, Any]] = None, src_root: Optional[str] = None) -> Tuple[bool, Dict[str, Any], Optional[str]]:
     anomaly_type = anomaly.get("type", "")
     desc = anomaly.get("description", "").lower()
     callee = anomaly.get("callee", "").lower()
@@ -155,7 +155,7 @@ def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Di
     if anomaly_type == "UNTESTED_REACHABLE_CODE":
         return True, NON_DEFECT_RULES["ND-7"], "verified"
 
-    verified = _verify_field_ordering(anomaly)
+    verified = _verify_field_ordering(anomaly, src_root)
     if verified is True:
         return True, NON_DEFECT_RULES["ND-1"], "verified"
     if verified is False:
@@ -164,7 +164,7 @@ def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Di
         return True, NON_DEFECT_RULES["ND-1"], "heuristic"
 
     if anomaly_type in ("QUADRATIC_NESTED_LOOP", "LINEAR_SEARCH_IN_LOOP"):
-        verified = _verify_static_bound(anomaly)
+        verified = _verify_static_bound(anomaly, src_root)
         if verified is True:
             return True, NON_DEFECT_RULES["ND-2"], "verified"
         if verified is False:
@@ -181,7 +181,7 @@ def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Di
         if "caffeine" in callee or "guava" in callee or "lru" in desc or "bounded cache" in desc:
             return True, NON_DEFECT_RULES["ND-3"], "heuristic"
 
-    verified = _verify_static_bound(anomaly)
+    verified = _verify_static_bound(anomaly, src_root)
     if verified is True:
         return True, NON_DEFECT_RULES["ND-4"], "verified"
     if verified is False:
@@ -199,11 +199,11 @@ def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Di
     return False, {}, None
 
 
-def annotate_report_with_non_defects(anomalies: list, context: Optional[Dict[str, Any]] = None) -> list:
+def annotate_report_with_non_defects(anomalies: list, context: Optional[Dict[str, Any]] = None, src_root: Optional[str] = None) -> list:
     processed = []
     for item in anomalies:
         item_copy = dict(item)
-        is_non_defect, rule, confidence = classify_anomaly_as_non_defect(item_copy, context)
+        is_non_defect, rule, confidence = classify_anomaly_as_non_defect(item_copy, context, src_root)
         if is_non_defect:
             item_copy["is_defect"] = False
             item_copy["status"] = "NON_DEFECT"

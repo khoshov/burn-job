@@ -112,12 +112,12 @@ def _run_graph_analyzers(conn, target_keys: list,
     return anomalies
 
 
-def _run_static_patterns(target_keys: list) -> list:
+def _run_static_patterns(target_keys: list, src_dir: str = SRC_ROOT) -> list:
     anomalies = []
     for key in target_keys:
         key_upper = key.upper()
         if key_upper in STATIC_PATTERN_DETECTORS:
-            results = STATIC_PATTERN_DETECTORS[key_upper]()
+            results = STATIC_PATTERN_DETECTORS[key_upper](src_dir)
             for a in results:
                 a["_source"] = "static"
             anomalies.extend(results)
@@ -212,13 +212,16 @@ def _merge_dual_evidence(static_anomalies: List[dict],
 def analyze_anomalies(db_path: str, selected_categories: list = None,
                       annotate_non_defects: bool = True,
                       classpath_dir: str = DEFAULT_CLASSPATH_DIR,
-                      cross_reference: bool = True) -> list:
+                      cross_reference: bool = True,
+                      src_dir: str = None) -> list:
     if not HAS_KUZU:
         print("Error: 'kuzu' Python package is required. Install via: pip install kuzu")
         sys.exit(1)
     if not os.path.exists(db_path):
         print(f"Error: KuzuDB database path '{db_path}' does not exist.")
         sys.exit(1)
+
+    effective_src_dir = src_dir or SRC_ROOT
 
     db = kuzu.Database(db_path)
     conn = kuzu.Connection(db)
@@ -231,8 +234,8 @@ def analyze_anomalies(db_path: str, selected_categories: list = None,
         reachable_methods = compute_reachable(call_graph, entry_points)
 
     graph_anomalies = _run_graph_analyzers(conn, target_keys, reachable_methods, declared_methods)
-    static_anomalies = _run_static_patterns(target_keys)
-    static_anomalies += gather_non_defect_candidates()
+    static_anomalies = _run_static_patterns(target_keys, effective_src_dir)
+    static_anomalies += gather_non_defect_candidates(effective_src_dir)
 
     if cross_reference:
         all_anomalies = _merge_dual_evidence(static_anomalies, graph_anomalies)
@@ -241,7 +244,7 @@ def analyze_anomalies(db_path: str, selected_categories: list = None,
 
     if annotate_non_defects:
         context = {"growth_status": _build_growth_status(conn)}
-        all_anomalies = annotate_report_with_non_defects(all_anomalies, context)
+        all_anomalies = annotate_report_with_non_defects(all_anomalies, context, src_root=effective_src_dir)
 
     for a in all_anomalies:
         if "confidence" not in a:

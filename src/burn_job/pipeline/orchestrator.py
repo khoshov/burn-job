@@ -414,8 +414,8 @@ class AutonomousOrchestrator:
 
         # STEP 5: Detect Taxonomy Defects & Export Findings
         logger.info("STEP 5/8: Running defect taxonomy detectors...")
-        anomalies = analyze_anomalies(self.db_path)
-        findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, run_log_path=self.log_path)
+        anomalies = analyze_anomalies(self.db_path, src_dir=self.src_dir)
+        findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, run_log_path=self.log_path, src_dir=self.src_dir)
 
         logger.info("Attaching variant comparisons with AST scoring...")
         project_dir = self._find_project_dir()

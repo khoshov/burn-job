@@ -131,21 +131,21 @@ def _channel_for(family: str, taxonomy_id: str, diff_metric: str = None) -> str:
 _FILE_LINE_RE = re.compile(r"^(.+\.java):(\d+)$")
 
 
-def _resolve_one(value: str):
+def _resolve_one(value: str, src_dir: str = None):
     m = _FILE_LINE_RE.match(value)
     if m:
         line = int(m.group(2))
         return m.group(1), line, line
-    return resolve_source_location(value)
+    return resolve_source_location(value, src_root=src_dir)
 
 
-def _resolve_location_for_anomaly(anomaly: dict):
+def _resolve_location_for_anomaly(anomaly: dict, src_dir: str = None):
     callee = anomaly.get("callee", "")
     caller = anomaly.get("caller", "")
-    loc = _resolve_one(callee) if callee else None
+    loc = _resolve_one(callee, src_dir) if callee else None
     if loc is not None:
         return loc
-    loc = _resolve_one(caller) if caller else None
+    loc = _resolve_one(caller, src_dir) if caller else None
     return loc
 
 
@@ -183,6 +183,7 @@ def build_findings_from_anomalies(
     diff_entries: list = None,
     baseline_run_id: str = None,
     candidate_run_id: str = None,
+    src_dir: str = None,
 ):
     findings = []
     checked_but_not_an_issue = []
@@ -190,7 +191,7 @@ def build_findings_from_anomalies(
     by_edge, by_method = _build_diff_index(diff_entries) if diff_entries else ({}, {})
 
     for anomaly in anomalies:
-        location = _resolve_location_for_anomaly(anomaly)
+        location = _resolve_location_for_anomaly(anomaly, src_dir)
         taxonomy_id = anomaly.get("taxonomy_id", "TAX")
         anomaly_type = anomaly.get("type", "UNKNOWN")
 
