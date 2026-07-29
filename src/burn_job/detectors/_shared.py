@@ -5,9 +5,11 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
+from burn_job.core.config import DEFAULT_SRC_DIR
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-SRC_ROOT = os.path.join(REPO_ROOT, "java", "src", "main", "java")
+SRC_ROOT = DEFAULT_SRC_DIR
 
 
 @functools.lru_cache(maxsize=1)
