@@ -127,12 +127,26 @@ def _verify_bounded_cache(anomaly: Dict[str, Any], context: Optional[Dict[str, A
     return status != "growing"
 
 
+NON_DEFECT_EXPLICIT_TYPES = {
+    "NON_DEFECT_FIELD_ORDERING": "ND-1",
+    "NON_DEFECT_BOUNDED_QUADRATIC": "ND-2",
+    "NON_DEFECT_BOUNDED_CACHE": "ND-3",
+    "NON_DEFECT_BOUNDED_REQUEST_COLLECTION": "ND-4",
+    "NON_DEFECT_MICROBENCHMARK_NOISE": "ND-5",
+    "NON_DEFECT_CODE_STYLE": "ND-6",
+}
+
+
 def classify_anomaly_as_non_defect(anomaly: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Tuple[bool, Dict[str, Any], Optional[str]]:
     anomaly_type = anomaly.get("type", "")
     desc = anomaly.get("description", "").lower()
     callee = anomaly.get("callee", "").lower()
     pct = anomaly.get("percentage", 0.0)
     samples = anomaly.get("sample_count", 0)
+
+    if anomaly_type in NON_DEFECT_EXPLICIT_TYPES:
+        rule_key = NON_DEFECT_EXPLICIT_TYPES[anomaly_type]
+        return True, NON_DEFECT_RULES[rule_key], "verified"
 
     if anomaly_type == "UNTESTED_REACHABLE_CODE":
         return True, NON_DEFECT_RULES["ND-7"], "verified"

@@ -20,6 +20,7 @@ from burn_job.pipeline.scanner import ControllerScanner
 from burn_job.pipeline.loadtest import LoadtestGenerator
 from burn_job.graph.store import KuzuGraphStore
 from burn_job.detectors.orchestrate import analyze_anomalies
+from burn_job.detectors.variant_comparison import attach_variant_comparisons
 from burn_job.report.builder import build_findings_from_anomalies, build_schema_report
 from burn_job.report.detailed_reporter import generate_markdown_report, print_findings_summary
 from burn_job.refinement.iterative_loop import run_iterative_loop
@@ -90,6 +91,7 @@ class AutonomousOrchestrator:
         logger.info("STEP 5/8: Running defect taxonomy detectors...")
         anomalies = analyze_anomalies(self.db_path)
         findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, run_log_path=self.log_path)
+        findings = attach_variant_comparisons(findings)
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
         detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")
 

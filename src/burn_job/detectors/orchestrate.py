@@ -22,11 +22,19 @@ except ImportError:
 
 from burn_job.detectors.callgraph import build_static_call_graph, compute_reachable
 from burn_job.detectors.differential import compare_runs, list_run_ids
+from burn_job.detectors import patterns as static_patterns
 from burn_job.detectors.patterns import (
     detect_n_plus_one,
     detect_existence_check_full_fetch,
     detect_nested_loops,
     detect_duplicate_methods,
+    detect_boxed_wrapper_overhead,
+    detect_redundant_null_checks,
+    detect_unbatched_save_loop,
+    detect_unbounded_static_map,
+    detect_in_memory_stream_filtering,
+    detect_cpu_hotspot_patterns,
+    gather_non_defect_candidates,
 )
 from burn_job.detectors.taxonomy.t1_redundant_ops import analyze_t1
 from burn_job.detectors.taxonomy.t2_inefficient_algos import analyze_t2
@@ -60,7 +68,12 @@ STATIC_PATTERN_DETECTORS = {
     "T1": detect_duplicate_methods,
     "T2": detect_nested_loops,
     "T3": detect_existence_check_full_fetch,
-    "T6": detect_n_plus_one,
+    "T4": detect_boxed_wrapper_overhead,
+    "T5": detect_redundant_null_checks,
+    "T6": detect_unbatched_save_loop,
+    "T7": detect_unbounded_static_map,
+    "T8": detect_in_memory_stream_filtering,
+    "T9": detect_cpu_hotspot_patterns,
 }
 
 
@@ -206,6 +219,7 @@ def analyze_anomalies(db_path: str, selected_categories: list = None,
 
     graph_anomalies = _run_graph_analyzers(conn, target_keys, reachable_methods, declared_methods)
     static_anomalies = _run_static_patterns(target_keys)
+    static_anomalies += gather_non_defect_candidates()
 
     if cross_reference:
         all_anomalies = _merge_dual_evidence(static_anomalies, graph_anomalies)

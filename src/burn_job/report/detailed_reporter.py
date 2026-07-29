@@ -1,13 +1,9 @@
-"""
-Detailed Findings Report Generator & Console Renderer.
-Formats findings with Qwen3 AI Analysis, 3 Optimization Variants, and Before/After Benchmark Impact Comparison.
-"""
+"""Detailed Findings Report Generator & Console Renderer."""
 
 import os
 from typing import List, Dict, Any
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 console = Console()
 
@@ -23,91 +19,58 @@ TAXONOMY_NAMES = {
     "T9": "CPU Hotspots & Lock Contention",
 }
 
-VARIANT_STRATEGIES = {
-    "T1": [
-        ("Вариант 1 (Предварительный Map-индекс и Batch-lookup)", "Вынести повторные вызовы из циклов. Сформировать Set ключей, выполнить единый батч-запрос `findAllById` / `findAllByCodeIn`, и индексировать элементы в `Map<Key, Entity>` перед циклом."),
-        ("Вариант 2 (Пакетная вставка JDBC/Hibernate Batch `saveAll`)", "Группировать сущности в батчи размером 1000 элементов и выполнять единый вызов `repository.saveAll()` с включённым `spring.jpa.properties.hibernate.jdbc.batch_size=1000`."),
-        ("Вариант 3 (Кэширование справочников и единые точки обработки)", "Вынести повторяющиеся конструкторы/исключения в общий утилитный класс или `@RestControllerAdvice` хэндлер, задействовав `@Cacheable` Caffeine кэш для статических метрик."),
-    ],
-    "T2": [
-        ("Вариант 1 (Индексация HashMap O(N+M))", "Заменить вложенные переборы O(N*M) предварительным построением `Map<Key, List<Entity>>` до внешнего цикла."),
-        ("Вариант 2 (HashSet фильтрация O(1))", "Преобразовать коллекцию поиска в `Set<String>` или `HashSet<Long>` для O(1) проверок `contains()`."),
-        ("Вариант 3 (Сортировка на уровне SQL ORDER BY)", "Перенести повторные сортировки потоков на уровень БД-запроса (`ORDER BY`), исключив `stream().sorted()` в JVM."),
-    ],
-    "T6": [
-        ("Вариант 1 (Spring Data `@EntityGraph` / `JOIN FETCH`)", "Добавить `@EntityGraph(attributePaths = {...})` или `JOIN FETCH` в JPQL запрос, загружая связанные сущности за 1 SQL-запрос вместо N ленивых запросов."),
-        ("Вариант 2 (Interface Projections & DTO Constructors)", "Использовать Spring Data интерфейсные проекции или Record DTO конструкторы (`SELECT new Dto(...)`) без загрузки Hibernate-сущностей."),
-        ("Вариант 3 (Пакетная вставка batch-inserts)", "Использовать `reWriteBatchedInserts=true` и `saveAll()`."),
-    ],
-}
 
-DEFAULT_VARIANTS = [
-    ("Вариант 1 (Декларативная Spring Data / JPQL Проекция)", "Использование Record DTO конструкторов `SELECT new ...` или `@EntityGraph JOIN FETCH` для минимизации замеров Heap."),
-    ("Вариант 2 (Пакетная обработка и Map-индексация)", "Выборка данных батчами, использование `Map<Key, Entity>` и `repository.saveAll()`."),
-    ("Вариант 3 (Низкоуровневая оптимизация и кэширование)", "Использование примитивных типов (`long[]`), статических скомпилированных `Pattern` и кэша Caffeine."),
-]
-
-def _get_benchmark_metrics(idx: int, tax_code: str):
-    """Generate benchmark performance impact simulation metrics for variant reporting."""
-    base_latency = 350 + (idx * 45) % 300
-    opt_latency = max(18, int(base_latency * 0.12))
-    latency_delta = round((opt_latency - base_latency) / base_latency * 100, 1)
-
-    base_sql = 150 + (idx * 23) % 100 if tax_code in ("T1", "T6") else 12
-    opt_sql = 2 if tax_code in ("T1", "T6") else 2
-    sql_delta = round((opt_sql - base_sql) / base_sql * 100, 1) if base_sql > 0 else 0.0
-
-    base_rps = 120 + (idx * 15) % 80
-    opt_rps = base_rps * 6
-    rps_delta = round((opt_rps - base_rps) / base_rps * 100, 1)
-
-    return {
-        "base_latency": f"{base_latency} ms",
-        "opt_latency": f"{opt_latency} ms",
-        "latency_delta": f"{latency_delta}%",
-        "base_sql": f"{base_sql} msgs/req",
-        "opt_sql": f"{opt_sql} msgs/req",
-        "sql_delta": f"{sql_delta}%",
-        "base_rps": f"{base_rps} req/s",
-        "opt_rps": f"{opt_rps} req/s",
-        "rps_delta": f"+{rps_delta}%",
-    }
+def _safe(val: Any, fallback: str = "—") -> str:
+    if val is None:
+        return fallback
+    if isinstance(val, float):
+        return f"{val}/100"
+    return str(val)
 
 
 def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: List[Dict[str, Any]] = None):
-    """Renders a rich, detailed console report for all detected findings."""
     if not findings:
-        console.print(Panel("[bold green]✓ No performance defects or violations detected![/bold green]", title="Audit Summary"))
+        console.print(Panel("[bold green]✓ No performance defects detected[/bold green]", title="Audit Summary"))
         return
 
-    console.print(f"\n[bold red]=== DETECTED PERFORMANCE VIOLATIONS & QWEN3 AI OPTIMIZATION ANALYSIS ({len(findings)}) ===[/bold red]\n")
+    console.print(f"\n[bold red]=== DETECTED PERFORMANCE VIOLATIONS ({len(findings)}) ===[/bold red]\n")
 
     for idx, f in enumerate(findings, 1):
-        tax_codes = ", ".join(f.get("pdf_taxonomy", ["T1"]))
-        tax_title = ", ".join([TAXONOMY_NAMES.get(code, code) for code in f.get("pdf_taxonomy", ["T1"])])
+        tax_codes = f.get("pdf_taxonomy", ["T1"])
+        tax_codes_str = ", ".join(tax_codes)
+        tax_title = ", ".join([TAXONOMY_NAMES.get(code, code) for code in tax_codes])
         file_path = f.get("file", "unknown")
         line_from = f.get("line_from", 1)
         mechanism = f.get("mechanism", "")
         impact = f.get("impact", "")
-        fix = f.get("fix", "")
+        variants = f.get("variants", [])
 
-        bm = _get_benchmark_metrics(idx, tax_codes)
+        sections = [
+            f"[bold yellow]📍 Location:[/bold yellow] [green]{file_path}:{line_from}[/green]",
+            f"[bold yellow]🏷️ Category:[/bold yellow] [cyan][{tax_codes_str}] {tax_title}[/cyan]",
+            f"[bold yellow]⚠️ Impact:[/bold yellow] {impact}",
+            "",
+            f"[bold red]🔍 Analysis:[/bold red]\n{mechanism}",
+        ]
 
-        panel_content = (
-            f"[bold yellow]📍 Location:[/bold yellow] [green]{file_path}:{line_from}[/green]\n"
-            f"[bold yellow]🏷️ Taxonomy Category:[/bold yellow] [cyan][{tax_codes}] {tax_title}[/cyan]\n"
-            f"[bold yellow]⚠️ Impact:[/bold yellow] {impact}\n\n"
-            f"[bold red]🤖 Qwen3 Model AI Analysis:[/bold red]\n{mechanism}\n\n"
-            f"[bold green]💡 Recommended Fix Strategy (Как исправить):[/bold green]\n{fix}\n\n"
-            f"[bold magenta]📊 Tested Performance Impact (Сравнение До / После):[/bold magenta]\n"
-            f"  • [bold]Latency P95:[/bold]  {bm['base_latency']} ➔ [bold green]{bm['opt_latency']}[/bold green] ([green]{bm['latency_delta']}[/green])\n"
-            f"  • [bold]SQL Queries:[/bold]  {bm['base_sql']} ➔ [bold green]{bm['opt_sql']}[/bold green] ([green]{bm['sql_delta']}[/green])\n"
-            f"  • [bold]Throughput:[/bold]   {bm['base_rps']} ➔ [bold green]{bm['opt_rps']}[/bold green] ([green]{bm['rps_delta']}[/green])"
-        )
+        if variants:
+            lines = []
+            for v in variants:
+                score = _safe(v.get("score"))
+                marker = "🏆 WINNER" if v.get("is_winner") else "⚪"
+                lines.append(f"  [{marker}] [bold]{v['strategy']}[/bold] — Score: [cyan]{score}[/cyan]")
+            sections.append("")
+            sections.append(f"[bold green]📋 Variants:[/bold green]")
+            sections.append("\n".join(lines))
+
+        if variants:
+            w = variants[0] if any(v.get("is_winner") for v in variants) else variants[0]
+            sections.append("")
+            sections.append(f"[bold green]🏆 Winner:[/bold green] {w['strategy']} ([cyan]{_safe(w.get('score'))}[/cyan])")
 
         console.print(Panel(
-            panel_content,
-            title=f"[bold white]Finding #{idx} — [{tax_codes}] {os.path.basename(file_path)}:{line_from}[/bold white]",
+            "\n".join(sections),
+            title=f"[bold white]Finding #{idx} — [{tax_codes_str}] {os.path.basename(file_path)}:{line_from}[/bold white]",
             border_style="red",
             expand=True
         ))
@@ -119,66 +82,67 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
 
 
 def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: List[Dict[str, Any]], output_path: str):
-    """Generates a detailed Markdown report file with Qwen3 analysis, 3 variants, and benchmark impact."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    lines = []
-    lines.append("# 📊 Подробный отчёт об аномалиях производительности и вариантах оптимизации Qwen3 AI\n")
-    lines.append(f"> **Всего обнаружено нарушений:** `{len(findings)}`  \n")
-    lines.append("> **Режим выполнения:** `REPORT ONLY` (Исходный код `test_project` сохранён без изменений)\n")
-    lines.append("---\n")
+    lines = [
+        "# 📊 Подробный отчёт: Анализ нарушений и варианты исправлений\n",
+        f"> **Всего обнаружено нарушений:** `{len(findings)}`  \n",
+        "> **Режим выполнения:** `REPORT ONLY` (исходный код не изменён)\n",
+        "---\n",
+    ]
 
     if not findings:
         lines.append("### ✅ Нарушений производительности не обнаружено.\n")
     else:
-        lines.append("## 📋 Оглавление обнаруженных нарушений\n")
-        lines.append("| № | Категория | Файл | Строка | Влияние |Прогнозируемое ускорение |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("## 📋 Оглавление\n")
+        lines.append("| № | Категория | Файл | Строка | Победивший вариант |")
+        lines.append("|---|---|---|---|---|")
         for idx, f in enumerate(findings, 1):
-            tax_codes = ", ".join(f.get("pdf_taxonomy", ["T1"]))
+            tax_codes_str = ", ".join(f.get("pdf_taxonomy", ["T1"]))
             file_name = os.path.basename(f.get("file", ""))
-            bm = _get_benchmark_metrics(idx, tax_codes)
-            lines.append(f"| {idx} | `{tax_codes}` | [`{file_name}`](file://{os.path.abspath(f.get('file', ''))}#L{f.get('line_from', 1)}) | L{f.get('line_from', 1)} | {f.get('impact', '')} | **{bm['latency_delta']} latency** |")
+            winner = f.get("winner", {})
+            w_title = winner.get("strategy", "—") if winner else "—"
+            lines.append(f"| {idx} | `{tax_codes_str}` | [`{file_name}`](file://{os.path.abspath(f.get('file', ''))}#L{f.get('line_from', 1)}) | L{f.get('line_from', 1)} | **{w_title}** |")
         lines.append("\n---\n")
 
-        lines.append("## 🔍 Подробный разбор нарушений, вариантов исправлений Qwen3 и замеров эффекта\n")
+        lines.append("## 🔍 Разбор нарушений\n")
 
         for idx, f in enumerate(findings, 1):
-            tax_codes = ", ".join(f.get("pdf_taxonomy", ["T1"]))
-            tax_title = ", ".join([TAXONOMY_NAMES.get(code, code) for code in f.get("pdf_taxonomy", ["T1"])])
+            tax_codes = f.get("pdf_taxonomy", ["T1"])
+            tax_codes_str = ", ".join(tax_codes)
+            tax_title = ", ".join([TAXONOMY_NAMES.get(code, code) for code in tax_codes])
             file_path = f.get("file", "")
             line_from = f.get("line_from", 1)
             mechanism = f.get("mechanism", "")
             impact = f.get("impact", "")
-            fix = f.get("fix", "")
+            variants = f.get("variants", [])
+            winner = f.get("winner", {})
 
-            bm = _get_benchmark_metrics(idx, tax_codes)
-            variants = VARIANT_STRATEGIES.get(tax_codes, DEFAULT_VARIANTS)
+            w_title = winner.get("strategy", "—") if winner else "—"
+            w_score = _safe(winner.get("score")) if winner else "—"
 
-            lines.append(f"### Finding #{idx}: [{tax_codes}] {os.path.basename(file_path)} (Line {line_from})\n")
-            lines.append(f"- **Категория:** `{tax_codes}` — {tax_title}")
-            lines.append(f"- **Локация:** [`{file_path}`](file://{os.path.abspath(file_path)}#L{line_from})")
-            lines.append(f"- **Серьёзность / Влияние:** {impact}\n")
+            lines.append(f"### Finding #{idx}: [{tax_codes_str}] {os.path.basename(file_path)} (Line {line_from})\n")
+            lines.append(f"- **Категория:** `{tax_codes_str}` — {tax_title}")
+            lines.append(f"- **Файл:** [`{file_path}`](file://{os.path.abspath(file_path)}#L{line_from})")
+            lines.append(f"- **Влияние:** {impact}\n")
 
-            lines.append("#### 🤖 Анализ локальной модели Qwen3 AI (Суть нарушения)")
+            lines.append("#### 🔍 Анализ")
             lines.append(f"```text\n{mechanism}\n```\n")
 
-            lines.append("#### 🛠️ Варианты исправлений, сгенерированные Qwen3 AI\n")
-            for v_title, v_desc in variants:
-                lines.append(f"##### 🔹 {v_title}")
-                lines.append(f"> {v_desc}\n")
+            if variants:
+                lines.append("#### 🛠️ Варианты исправлений\n")
+                lines.append("| Вариант | Score | Результат |")
+                lines.append("|---|---|---|")
+                for v in variants:
+                    score = _safe(v.get("score"))
+                    marker = "🏆 **Победитель**" if v.get("is_winner") else "⚪ Альтернатива"
+                    lines.append(f"| **{v['strategy']}** | {score} | {marker} |")
+                lines.append("")
 
-            lines.append("#### 📊 Протестированный эффект на производительность (Before vs After Benchmark)\n")
-            lines.append("| Метрика производительности | До оптимизации (Before) | После оптимизации (After) | Изменение / Эффект |")
-            lines.append("|---|---|---|---|")
-            lines.append(f"| **Задержка ответа (Latency P95)** | `{bm['base_latency']}` | `{bm['opt_latency']}` | **{bm['latency_delta']}** ⚡ |")
-            lines.append(f"| **Количество SQL-запросов** | `{bm['base_sql']}` | `{bm['opt_sql']}` | **{bm['sql_delta']}** 🚀 |")
-            lines.append(f"| **Пропускная способность (RPS)** | `{bm['base_rps']}` | `{bm['opt_rps']}` | **{bm['rps_delta']}** 📈 |")
-            lines.append("\n```text")
-            lines.append("Профиль задержки (Before vs After):")
-            lines.append(f"Before: [==================================================] {bm['base_latency']}")
-            lines.append(f"After : [====                                              ] {bm['opt_latency']} ({bm['latency_delta']})")
-            lines.append("```\n")
+            if winner:
+                lines.append(f"#### 🏆 Победивший вариант: {w_title}")
+                lines.append(f"> **Score:** {w_score}  \n> _Результаты бенчмарка требуют профилирования._\n")
+
             lines.append("---\n")
 
     with open(output_path, "w", encoding="utf-8") as fp:

@@ -12,6 +12,7 @@ import sys
 from burn_job.detectors.orchestrate import analyze_anomalies
 from burn_job.detectors.source_mapping import resolve_source_location
 from burn_job.detectors.differential import compare_runs, list_run_ids
+from burn_job.detectors.variant_comparison import attach_variant_comparisons
 
 
 TAXONOMY_TO_FAMILY = {
@@ -314,6 +315,7 @@ def main():
     findings, checked_but_not_an_issue, skipped = build_findings_from_anomalies(
         anomalies, args.run_log, diff_entries, baseline_run_id, candidate_run_id
     )
+    findings = attach_variant_comparisons(findings)
     report = build_schema_report(args.set_name, args.level_name, findings, checked_but_not_an_issue)
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
