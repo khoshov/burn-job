@@ -30,6 +30,9 @@ make run
 # Запуск полного автономного цикла:
 ./run.sh run-cycle
 
+# Снятие JFR-профиля с запущенного Java-приложения (1 команда):
+./run.sh profile --duration 15 --output ./app_profiling.jfr
+
 # Сканирование эндпоинтов:
 ./run.sh scan
 
@@ -864,6 +867,19 @@ def score_candidate(code, complexity_res):
 - После **3 последовательных ошибок** -- `rolled_back_to_original` (восстановление исходного кода, завершение цикла)
 - Успешная сборка: обнуление счётчика, фиксация текущего варианта в `current_code`
 - **LLM не используется** -- стандартный вызов Maven CLI
+
+### Мульти-вариантные стратегии исправлений (Fix Variants) 💡
+
+При мульти-вариантной генерации рефакторинга LLM-агент параллельно строит **3 независимых архитектурных варианта** реализации:
+
+1. **`[VARIANT_1]` (Declarative Spring Data & Projections)**:
+   Использование декларативных DTO-проекций, Record DTOs (`SELECT new ru.package.RecordDTO(...)`), `@EntityGraph` и функциональных механизмов Spring Data.
+2. **`[VARIANT_2]` (Batching & Upfront Hash-Map Lookup)**:
+   Массовая предварительная выборка данных (`findAllById` / `repository.findAll`), построение $O(1)$ хэш-индексов в памяти и пакетная запись (`saveAll`).
+3. **`[VARIANT_3]` (Low-Overhead & Primitive Caching)**:
+   Применение примитивных структур данных (`int[]`, `long[]`), замена регулярных выражений на `private static final Pattern` и исключение лишних аллокаций памяти.
+
+---
 
 ### Этап 8: Оценка и выбор победителя ⚙️
 
