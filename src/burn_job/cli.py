@@ -109,10 +109,22 @@ def run_cycle(
         backend=backend.value,
     )
     res = orchestrator.run()
+    findings_json = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
+
     if res.get("success"):
-        console.print("\n[bold green][✓] Autonomous cycle finished successfully.[/bold green]")
+        console.print(Panel.fit(
+            f"[bold green]✓ Cycle Completed Successfully![/bold green]\n"
+            f"Endpoints Profiled: [cyan]{res.get('endpoints_count', 0)}[/cyan]\n"
+            f"Findings Detected:  [yellow]{res.get('findings_count', 0)}[/yellow]\n"
+            f"Report Generated:   [bold green]{findings_json}[/bold green]",
+            title="[bold green]Report Summary[/bold green]"
+        ))
     else:
-        console.print("\n[bold yellow][!] Autonomous cycle finished with warnings.[/bold yellow]")
+        console.print(Panel.fit(
+            f"[bold yellow]! Cycle Finished with Warnings[/bold yellow]\n"
+            f"Report Generated: [bold green]{findings_json}[/bold green]",
+            title="[bold yellow]Report Summary[/bold yellow]"
+        ))
 
 
 @app.command("version", help="Print CLI version.")
