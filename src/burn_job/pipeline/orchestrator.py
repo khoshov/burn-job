@@ -4,7 +4,9 @@ import os
 import sys
 import json
 import subprocess
-from typing import Dict, Any, Optional
+import time
+import urllib.request
+from typing import Dict, Any, List, Optional
 
 from burn_job.core.config import (
     REPO_ROOT,
@@ -43,6 +45,7 @@ class AutonomousOrchestrator:
         model_path: str = None,
         backend: str = "auto",
         server_port: int = None,
+        variant_llm: str = "deepseek",
     ):
         self.src_dir = src_dir
         self.db_path = db_path
@@ -54,6 +57,7 @@ class AutonomousOrchestrator:
         self.log_path = log_path
         self.model_path = model_path
         self.backend = backend
+        self.variant_llm = variant_llm
         self.graph_store = KuzuGraphStore(db_path)
         from burn_job.refinement.agent import LLMAgent
 
@@ -68,6 +72,164 @@ class AutonomousOrchestrator:
         self.agent = LLMAgent(model_path=env_model_path, backend=env_backend, server_port=server_port) if (
             not offline or has_model_or_api or env_backend in ("vllm", "llama.cpp")
         ) else None
+
+    def _kill_app_on_port(self, port: int = 8080):
+        try:
+            result = subprocess.run(["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True, timeout=5)
+            if result.stdout.strip():
+                pids = result.stdout.strip().split("\n")
+                for pid in pids:
+                    subprocess.run(["kill", pid], capture_output=True, timeout=3)
+                time.sleep(2)
+        except Exception:
+            pass
+
+    def _wait_for_app(self, port: int = 8080, timeout: int = 60) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"http://localhost:{port}/actuator/health", timeout=2):
+                    return True
+            except Exception:
+                time.sleep(1)
+        return False
+
+    def _read_micrometer_metric(self, endpoint_path: str) -> Optional[Dict[str, float]]:
+        try:
+            url = f"{self.host}/actuator/metrics/http.server.requests?tag=uri:{endpoint_path}"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                measurements = {m["statistic"]: m["value"] for m in data.get("measurements", [])}
+                return measurements
+        except Exception:
+            return None
+
+    def _benchmark_with_micrometer(self, endpoint_path: str, warmup: int = 50, measure: int = 500) -> Dict[str, float]:
+        full_url = f"{self.host}{endpoint_path}"
+
+        for _ in range(warmup):
+            try:
+                with urllib.request.urlopen(full_url, timeout=5):
+                    pass
+            except Exception:
+                pass
+
+        before = self._read_micrometer_metric(endpoint_path)
+        if not before:
+            return {"error": "micrometer_before_unavailable"}
+
+        for _ in range(measure):
+            try:
+                with urllib.request.urlopen(full_url, timeout=5):
+                    pass
+            except Exception:
+                pass
+
+        after = self._read_micrometer_metric(endpoint_path)
+        if not after:
+            return {"error": "micrometer_after_unavailable"}
+
+        count_delta = after.get("COUNT", 0) - before.get("COUNT", 0)
+        total_time_delta = after.get("TOTAL_TIME", 0) - before.get("TOTAL_TIME", 0)
+        max_val = after.get("MAX", 0)
+
+        return {
+            "count": int(count_delta),
+            "total_time_s": round(total_time_delta, 4),
+            "avg_s": round(total_time_delta / count_delta, 6) if count_delta > 0 else 0,
+            "max_s": round(max_val, 4),
+        }
+
+    def _resolve_finding_file(self, finding: Dict[str, Any]) -> Optional[str]:
+        rel_file = finding.get("file", "")
+        if not rel_file:
+            return None
+        rel_file = rel_file.replace("burn-job/", "", 1) if rel_file.startswith("burn-job/") else rel_file
+        abs_file = os.path.join(REPO_ROOT, rel_file)
+        if os.path.exists(abs_file):
+            return abs_file
+        candidate = os.path.join(os.getcwd(), rel_file)
+        if os.path.exists(candidate):
+            return candidate
+        return None
+
+    def _benchmark_variants(self, findings: List[Dict[str, Any]], endpoints: List = None) -> List[Dict[str, Any]]:
+        logger.info("Benchmarking LLM-generated variants...")
+        project_dir = self._find_project_dir()
+        if not project_dir:
+            logger.warning("No project dir found, skipping benchmark")
+            return findings
+
+        for finding in findings:
+            abs_file = self._resolve_finding_file(finding)
+            if not abs_file:
+                continue
+
+            with open(abs_file, "r", encoding="utf-8") as f:
+                original_code = f.read()
+
+            endpoint_path = endpoints[0].path if endpoints else "/api/light/compute"
+            file_path = finding.get("file", "")
+            if endpoints:
+                for ep in endpoints:
+                    controller = getattr(ep, 'controller_class', '')
+                    if controller and controller.replace('.java', '') in file_path:
+                        endpoint_path = ep.path
+                        break
+
+            for variant in finding.get("variants", []):
+                code = variant.get("generated_code")
+                if not code:
+                    continue
+
+                with open(abs_file, "w", encoding="utf-8") as f:
+                    f.write(code)
+
+                try:
+                    compile_res = subprocess.run(
+                        ["mvn", "compile", "-q"], cwd=project_dir,
+                        capture_output=True, text=True, timeout=120
+                    )
+                    if compile_res.returncode != 0:
+                        variant["benchmark"] = {"error": "compilation_failed", "stderr": compile_res.stderr[:200]}
+                        continue
+
+                    self._kill_app_on_port()
+                    app_proc = subprocess.Popen(
+                        ["mvn", "spring-boot:run", "-q"], cwd=project_dir,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    started = self._wait_for_app()
+                    if not started:
+                        app_proc.kill()
+                        variant["benchmark"] = {"error": "app_start_timeout"}
+                        continue
+
+                    time.sleep(1)
+                    bm = self._benchmark_with_micrometer(endpoint_path)
+                    variant["benchmark"] = bm
+                    if bm.get("avg_s") is not None:
+                        logger.info(f"  Benchmark {variant['strategy']}: avg={bm['avg_s']}s max={bm['max_s']}s ({bm.get('count')} reqs)")
+                    else:
+                        logger.info(f"  Benchmark {variant['strategy']}: {bm.get('error', 'unknown')}")
+
+                    app_proc.terminate()
+                    try:
+                        app_proc.wait(timeout=15)
+                    except Exception:
+                        app_proc.kill()
+                    self._kill_app_on_port()
+
+                except Exception as e:
+                    variant["benchmark"] = {"error": str(e)}
+                    self._kill_app_on_port()
+
+            with open(abs_file, "w", encoding="utf-8") as f:
+                f.write(original_code)
+
+        self._kill_app_on_port()
+        logger.info("Benchmark complete, restoring original code")
+        return findings
 
     def _find_project_dir(self) -> Optional[str]:
         current_dir = os.path.abspath(self.src_dir)
@@ -85,6 +247,7 @@ class AutonomousOrchestrator:
         # STEP 1: Scan REST Controllers
         logger.info("STEP 1/8: Scanning Java REST Controllers...")
         endpoints = ControllerScanner.scan_directory(self.src_dir)
+        self._discovered_endpoints = endpoints
         logger.info(f"Found {len(endpoints)} REST API endpoints.")
 
         # STEP 2: Generate Load Test Suite
@@ -115,7 +278,9 @@ class AutonomousOrchestrator:
         logger.info("Attaching variant comparisons with AST scoring...")
         project_dir = self._find_project_dir()
         verify_compile = project_dir is not None and not self.offline
-        findings = attach_variant_comparisons(findings, agent=self.agent, verify_compile=verify_compile)
+        findings = attach_variant_comparisons(findings, agent=self.agent, verify_compile=verify_compile, variant_llm=self.variant_llm)
+
+        findings = self._benchmark_variants(findings, endpoints)
 
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
         detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")

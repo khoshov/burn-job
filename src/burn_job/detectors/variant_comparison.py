@@ -41,6 +41,7 @@ def generate_and_evaluate_variants(
     target_file: str,
     agent: Optional[Any] = None,
     verify_compile: bool = False,
+    variant_llm: str = "local",
 ) -> List[Dict[str, Any]]:
     tax_codes = finding.get("pdf_taxonomy", ["T1"])
     names = _pick_strategy_names(tax_codes)
@@ -60,12 +61,17 @@ Existing Code:
 {original_code}
 ```
 Generate 3 distinct refactoring candidates per multi-variant instructions."""
-            resp = agent.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
+            if variant_llm == "deepseek" and agent.api_key:
+                deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+                resp = agent.call_llm_api(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT, model=deepseek_model)
+            else:
+                resp = agent.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
             candidate_codes = agent.extract_multi_code_blocks(resp)
         except Exception as e:
             pass
 
     for i, name in enumerate(names):
+        code = candidate_codes.get(f"v{i+1}", original_code)
         entry = {
             "strategy": name,
             "score_ast": None,
@@ -73,9 +79,8 @@ Generate 3 distinct refactoring candidates per multi-variant instructions."""
             "compiles": None,
             "is_winner": False,
             "errors": [],
+            "generated_code": code if code != original_code else None,
         }
-
-        code = candidate_codes.get(f"v{i+1}", original_code)
         try:
             entry["score_ast"] = round(_score_from_complexity(code), 2)
         except Exception as e:
@@ -106,6 +111,7 @@ def attach_variant_comparisons(
     findings: List[Dict[str, Any]],
     agent: Optional[Any] = None,
     verify_compile: bool = False,
+    variant_llm: str = "local",
 ) -> List[Dict[str, Any]]:
     enriched = []
     for f in findings:
@@ -125,7 +131,7 @@ def attach_variant_comparisons(
 
         if original_code and target_file:
             variants = generate_and_evaluate_variants(
-                f, original_code, target_file, agent=agent, verify_compile=verify_compile,
+                f, original_code, target_file, agent=agent, verify_compile=verify_compile, variant_llm=variant_llm,
             )
         else:
             names = _pick_strategy_names(f.get("pdf_taxonomy", ["T1"]))
@@ -134,11 +140,14 @@ def attach_variant_comparisons(
 
         winner = next((v for v in variants if v.get("is_winner")), (variants[0] if variants else None))
 
+        llm_model = getattr(agent, "model", None) if agent else None
+
         enriched.append({
             **f,
             "variants": variants,
             "winner": winner,
             "benchmark": None,
+            "llm_model": llm_model if any(v.get("generated_code") for v in variants) else None,
         })
 
     return enriched

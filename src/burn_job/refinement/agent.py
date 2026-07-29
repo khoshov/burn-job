@@ -282,10 +282,41 @@ class LLMAgent:
         self.base_url = (base_url or os.getenv("VLLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or default_base_url).rstrip("/")
 
         default_model = "qwen3" if (self.llama_model or self.vllm_engine) else ("deepseek-chat" if "deepseek" in self.base_url.lower() else "gpt-4o")
-        self.model = model or os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or default_model
+        self.model = model or os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("DEEPSEEK_MODEL") or default_model
 
     def is_api_configured(self) -> bool:
         return (self.vllm_engine is not None) or (self.llama_model is not None) or bool(self.api_key)
+
+    def call_llm_api(self, prompt: str, system_prompt: str = SYSTEM_PROMPT, model: str = None) -> str:
+        if not self.api_key:
+            raise ValueError("No API key configured for external LLM call. Set DEEPSEEK_API_KEY or OPENAI_API_KEY.")
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        payload = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4096,
+        }
+        self.logger.log("INFO", f"Calling external LLM API at {self.base_url} model={payload['model']}...")
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                return result["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8")
+            self.logger.log("ERROR", f"LLM API HTTPError {e.code}: {err_body}")
+            raise Exception(f"HTTP {e.code}: {err_body}")
+        except Exception as e:
+            self.logger.log("ERROR", f"LLM API Exception: {str(e)}")
+            raise
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
         max_tokens = 4096

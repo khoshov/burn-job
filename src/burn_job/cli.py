@@ -97,11 +97,13 @@ def run_cycle(
     model_path: Optional[str] = typer.Option(None, "--model-path", help="Path to local model file/directory (llama.cpp or vLLM)"),
     backend: BackendEnum = typer.Option(BackendEnum.auto, "--backend", help="LLM execution backend (auto, llama.cpp, vllm, openai)"),
     server_port: Optional[int] = typer.Option(None, "--server-port", help="Connect to running llama.cpp server on port (overrides auto-detect)"),
+    variant_llm: str = typer.Option("deepseek", "--variant-llm", help="LLM backend for variant code generation: local (llama.cpp) or deepseek"),
 ):
     mode_str = "[green]APPLY FIXES MODE[/green]" if apply else "[yellow]REPORT ONLY MODE (No code modified)[/yellow]"
+    variant_str = f" | Variant LLM: [magenta]{variant_llm}[/magenta]"
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
-        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]",
+        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]{variant_str}",
         title="[bold green]Starting Cycle[/bold green]"
     ))
     orchestrator = AutonomousOrchestrator(
@@ -114,6 +116,7 @@ def run_cycle(
         model_path=model_path,
         backend=backend.value,
         server_port=server_port,
+        variant_llm=variant_llm,
     )
     res = orchestrator.run()
     findings_json = res.get("findings_json", os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json"))

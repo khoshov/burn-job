@@ -82,6 +82,18 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
             f"[bold red]🔍 Analysis:[/bold red]\n{mechanism}",
         ]
 
+        llm_model = f.get("llm_model")
+        if llm_model:
+            sections.insert(0, f"[bold magenta]🤖 LLM:[/bold magenta] [cyan]{llm_model}[/cyan]")
+
+        evidence = f.get("evidence", {})
+        if evidence:
+            ev_before = evidence.get("before", 0)
+            ev_after = evidence.get("after", 0)
+            ev_channel = evidence.get("channel", "—")
+            sections.append(f"[bold blue]📊 Profiling:[/bold blue] channel=[cyan]{ev_channel}[/cyan] before=[red]{ev_before}[/red] after=[green]{ev_after}[/green]")
+            sections.append(f"  [dim]{evidence.get('how', '')}[/dim]")
+
         if variants:
             sections.append("")
             sections.append("[bold green]📋 Variants Tested:[/bold green]")
@@ -89,7 +101,19 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
                 s = _safe(v.get("score"))
                 c = _compile_badge(v)
                 marker = "🏆" if v.get("is_winner") else " "
-                sections.append(f"  {marker} [{c}] [bold]{v['strategy']}[/bold] — AST Score: [cyan]{s}[/cyan]")
+                bm = v.get("benchmark", {})
+                if bm.get("avg_s") is not None:
+                    bm_str = f" ⏱ {bm['avg_s']}s / max {bm['max_s']}s"
+                elif bm.get("error"):
+                    bm_str = " ⏱ error"
+                else:
+                    bm_str = ""
+                sections.append(f"  {marker} [{c}] [bold]{v['strategy']}[/bold] — AST Score: [cyan]{s}[/cyan]{bm_str}")
+                gen_code = v.get("generated_code")
+                if gen_code:
+                    label = "wins" if v.get("is_winner") else "alt"
+                    first_line = gen_code.split("\n")[0] if gen_code else ""
+                    sections.append(f"    [dim]└ Generated ({label}): {first_line[:80]}{'…' if len(first_line) > 80 else ''}[/dim]")
 
         if winner:
             sections.append("")
@@ -123,15 +147,17 @@ def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: 
         lines.append("### ✅ Нарушений производительности не обнаружено.\n")
     else:
         lines.append("## 📋 Оглавление\n")
-        lines.append("| № | Категория | Файл | Строка | Победивший вариант | AST Score |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("| № | Категория | Файл | Строка | Победивший вариант | AST Score | Бенчмарк (avg) |")
+        lines.append("|---|---|---|---|---|---|---|")
         for idx, f in enumerate(findings, 1):
             tax_codes_str = ", ".join(f.get("pdf_taxonomy", ["T1"]))
             file_name = os.path.basename(f.get("file", ""))
             winner = f.get("winner", {})
             w_title = winner.get("strategy", "—") if winner else "—"
             w_score = _safe(winner.get("score")) if winner else "—"
-            lines.append(f"| {idx} | `{tax_codes_str}` | [`{file_name}`](file://{os.path.abspath(f.get('file', ''))}#L{f.get('line_from', 1)}) | L{f.get('line_from', 1)} | **{w_title}** | `{w_score}` |")
+            w_bm = winner.get("benchmark", {})
+            w_bm_str = f"⏱ {w_bm.get('avg_s')}s" if w_bm.get("avg_s") is not None else "—"
+            lines.append(f"| {idx} | `{tax_codes_str}` | [`{file_name}`](file://{os.path.abspath(f.get('file', ''))}#L{f.get('line_from', 1)}) | L{f.get('line_from', 1)} | **{w_title}** | `{w_score}` | `{w_bm_str}` |")
         lines.append("\n---\n")
 
         lines.append("## 🔍 Разбор нарушений\n")
@@ -151,23 +177,50 @@ def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: 
             w_score = _safe(winner.get("score")) if winner else "—"
 
             lines.append(f"### Finding #{idx}: [{tax_codes_str}] {os.path.basename(file_path)} (Line {line_from})\n")
+
+            llm_model = f.get("llm_model")
+            if llm_model:
+                lines.append(f"> **🤖 Анализ выполнен LLM:** `{llm_model}`\n")
+
             lines.append(f"- **Категория:** `{tax_codes_str}` — {tax_title}")
             lines.append(f"- **Файл:** [`{file_path}`](file://{os.path.abspath(file_path)}#L{line_from})")
             lines.append(f"- **Влияние:** {impact}\n")
+
+            evidence = f.get("evidence", {})
+            if evidence:
+                ev_before = evidence.get("before", 0)
+                ev_after = evidence.get("after", 0)
+                ev_channel = evidence.get("channel", "—")
+                lines.append(f"- **📊 Профилирование:** канал `{ev_channel}`, сэмплов до: `{ev_before}`, после: `{ev_after}`")
+                lines.append(f"  > {evidence.get('how', '')}\n")
 
             lines.append("#### 🔍 Анализ")
             lines.append(f"```text\n{mechanism}\n```\n")
 
             if variants:
                 lines.append("#### 🛠️ Сравнение вариантов исправлений\n")
-                lines.append("| Вариант | AST Score | Компиляция | Результат |")
-                lines.append("|---|---|---|---|")
+                lines.append("| Вариант | AST Score | Бенчмарк (avg) | Компиляция | Результат |")
+                lines.append("|---|---|---|---|---|")
                 for v in variants:
                     s = _safe(v.get("score"))
                     c = {True: "✅", False: "❌", None: "—"}.get(v.get("compiles"), "—")
                     marker = "🏆 **Победитель**" if v.get("is_winner") else "⚪ Альтернатива"
-                    lines.append(f"| **{v['strategy']}** | `{s}` | {c} | {marker} |")
+                    bm = v.get("benchmark", {})
+                    if bm.get("avg_s") is not None:
+                        bm_str = f"⏱ {bm['avg_s']}s / max {bm['max_s']}s ({bm.get('count')} reqs)"
+                    elif bm.get("error"):
+                        bm_str = "❌ " + bm["error"]
+                    else:
+                        bm_str = "—"
+                    lines.append(f"| **{v['strategy']}** | `{s}` | `{bm_str}` | {c} | {marker} |")
                 lines.append("")
+
+                for v in variants:
+                    gen_code = v.get("generated_code")
+                    if gen_code:
+                        label = "🏆 Генерированный код (победитель)" if v.get("is_winner") else f"📄 Код: {v['strategy']}"
+                        lines.append(f"**{label}**")
+                        lines.append(f"```java\n{gen_code}\n```\n")
 
             if winner and variants:
                 lines.append("#### 🏆 Обоснование выбора победителя")
