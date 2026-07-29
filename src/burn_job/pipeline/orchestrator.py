@@ -4,7 +4,7 @@ import os
 import sys
 import json
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from burn_job.core.config import (
     REPO_ROOT,
@@ -57,6 +57,14 @@ class AutonomousOrchestrator:
         from burn_job.refinement.agent import LLMAgent
         self.agent = LLMAgent(model_path=model_path, backend=backend) if not offline or model_path or backend in ("vllm", "llama.cpp") else None
 
+    def _find_project_dir(self) -> Optional[str]:
+        current_dir = os.path.abspath(self.src_dir)
+        while current_dir and current_dir != os.path.dirname(current_dir):
+            if os.path.exists(os.path.join(current_dir, "pom.xml")):
+                return current_dir
+            current_dir = os.path.dirname(current_dir)
+        return None
+
     def run(self) -> Dict[str, Any]:
         logger.info("==================================================================")
         logger.info(" STARTING AUTONOMOUS PERFORMANCE OPTIMIZATION CYCLE")
@@ -91,7 +99,12 @@ class AutonomousOrchestrator:
         logger.info("STEP 5/8: Running defect taxonomy detectors...")
         anomalies = analyze_anomalies(self.db_path)
         findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, run_log_path=self.log_path)
-        findings = attach_variant_comparisons(findings)
+
+        logger.info("Attaching variant comparisons with AST scoring...")
+        project_dir = self._find_project_dir()
+        verify_compile = project_dir is not None and not self.offline
+        findings = attach_variant_comparisons(findings, agent=self.agent, verify_compile=verify_compile)
+
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
         detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")
 
@@ -105,38 +118,41 @@ class AutonomousOrchestrator:
 
         # STEP 6 & 7: LLM Refactoring Self-Optimization Loop
         modified_files = 0
-        logger.info("STEP 6-7/8: Running Qwen3 LLM multi-variant evaluation loop...")
+        logger.info("STEP 6-7/8: Running variant comparison & evaluation loop...")
         for idx, finding in enumerate(findings, 1):
-            rel_file = finding.get("file")
-            if not rel_file:
+            variants = finding.get("variants", [])
+            if not variants:
                 continue
-            abs_file = os.path.join(REPO_ROOT, rel_file)
-            if not os.path.exists(abs_file):
-                continue
+            winner = finding.get("winner", {})
+            w_score = winner.get("score") if winner else None
+            w_strategy = winner.get("strategy", "—") if winner else "—"
 
-            with open(abs_file, "r", encoding="utf-8") as f:
-                code_content = f.read()
-
-            tax_codes = ", ".join(finding.get("pdf_taxonomy", ["T1"]))
-            logger.info(f"  [Qwen3 Evaluator] Analyzing Finding #{idx} ({tax_codes}) in {rel_file} ({len(code_content)} bytes)...")
-            logger.info(f"    - Generated Variant 1: Batch Lookup & Map Indexing (Score: 92.5/100) -> WINNER")
-            logger.info(f"    - Generated Variant 2: Hibernate Batch saveAll (Score: 88.0/100)")
-            logger.info(f"    - Generated Variant 3: Caffeine Cache & Shared Helpers (Score: 81.0/100)")
+            logger.info(f"  Finding #{idx} — {w_strategy}")
+            for v in variants:
+                s = v.get("score", "—")
+                c = v.get("compiles")
+                w = "🏆" if v.get("is_winner") else " "
+                comp = {True: "✓ compiles", False: "✗ fails", None: "—"}.get(c, "—")
+                logger.info(f"    {w} Variant '{v.get('strategy', '?')}' — Score: {s}, Compile: {comp}")
 
             if self.apply_fixes:
-                res = run_iterative_loop(
-                    target_file=abs_file,
-                    max_steps=self.max_iterations,
-                    findings=[finding],
-                    run_log_path=self.log_path,
-                    verify_mvn=True,
-                    agent=self.agent,
-                )
-                if res.get("success"):
-                    modified_files += 1
+                rel_file = finding.get("file")
+                if rel_file:
+                    abs_file = os.path.join(REPO_ROOT, rel_file)
+                    if os.path.exists(abs_file):
+                        res = run_iterative_loop(
+                            target_file=abs_file,
+                            max_steps=self.max_iterations,
+                            findings=[finding],
+                            run_log_path=self.log_path,
+                            verify_mvn=True,
+                            agent=self.agent,
+                        )
+                        if res.get("success"):
+                            modified_files += 1
 
         if not self.apply_fixes:
-            logger.info("  [Qwen3 Evaluator] Evaluation complete. Preserved all test_project source files untouched (Read-Only Mode).")
+            logger.info("  Evaluation complete — variants scored via AST complexity analysis (report-only mode).")
 
         # STEP 8: Final Verification & Selection
         logger.info("STEP 8/8: Verifying Maven build...")
