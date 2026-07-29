@@ -431,8 +431,8 @@ class AutonomousOrchestrator:
         findings = self._benchmark_variants(findings, endpoints)
 
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
-        detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")
-        detailed_html_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.html")
+        detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "report.md")
+        detailed_html_path = os.path.join(REPO_ROOT, "reports", "sandbox", "report.html")
 
         report = build_schema_report("sandbox", "hard", findings, checked_not_issue)
         os.makedirs(os.path.dirname(findings_json_path) or ".", exist_ok=True)

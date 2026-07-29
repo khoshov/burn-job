@@ -206,7 +206,7 @@ def run_cycle(
     )
     res = orchestrator.run()
     findings_json = res.get("findings_json", os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json"))
-    detailed_md = res.get("detailed_md", os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md"))
+    detailed_md = res.get("detailed_md", os.path.join(REPO_ROOT, "reports", "sandbox", "report.md"))
 
     endpoints_list = res.get("endpoints", [])
     if endpoints_list:
