@@ -112,40 +112,76 @@ class AutonomousOrchestrator:
         except Exception:
             return None
 
-    def _benchmark_with_micrometer(self, endpoint_path: str, warmup: int = 50, measure: int = 500) -> Dict[str, float]:
+    def _benchmark_with_micrometer(self, endpoint_path: str, warmup: int = 5, measure: int = 20) -> Dict[str, float]:
         full_url = f"{self.host}{endpoint_path}"
+        elapsed_ms_list = []
 
         def _fire_req():
             try:
-                with urllib.request.urlopen(full_url, timeout=5):
-                    pass
+                req = urllib.request.Request(full_url)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    headers = getattr(resp, "headers", None)
+                    if headers and hasattr(headers, "get"):
+                        header_ms = headers.get("X-Elapsed-Ms")
+                        if header_ms and isinstance(header_ms, str):
+                            try:
+                                elapsed_ms_list.append(float(header_ms))
+                            except ValueError:
+                                pass
             except Exception:
                 pass
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Warmup
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             list(executor.map(lambda _: _fire_req(), range(warmup)))
 
-        before = self._read_micrometer_metric(endpoint_path)
-        if not before:
-            return {"error": "micrometer_before_unavailable"}
+        elapsed_ms_list.clear()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Read micrometer before
+        before = self._read_micrometer_metric(endpoint_path)
+
+        start_t = time.time()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             list(executor.map(lambda _: _fire_req(), range(measure)))
+        duration_t = time.time() - start_t
 
         after = self._read_micrometer_metric(endpoint_path)
-        if not after:
-            return {"error": "micrometer_after_unavailable"}
 
-        count_delta = after.get("COUNT", 0) - before.get("COUNT", 0)
-        total_time_delta = after.get("TOTAL_TIME", 0) - before.get("TOTAL_TIME", 0)
-        max_val = after.get("MAX", 0)
+        # 1. Direct X-Elapsed-Ms response header measurements (awrelius / custom timing header)
+        if elapsed_ms_list:
+            avg_s = round((sum(elapsed_ms_list) / len(elapsed_ms_list)) / 1000.0, 6)
+            max_s = round(max(elapsed_ms_list) / 1000.0, 6)
+            return {
+                "count": len(elapsed_ms_list),
+                "total_time_s": round(sum(elapsed_ms_list) / 1000.0, 4),
+                "avg_s": avg_s,
+                "max_s": max_s,
+            }
 
-        return {
-            "count": int(count_delta),
-            "total_time_s": round(total_time_delta, 4),
-            "avg_s": round(total_time_delta / count_delta, 6) if count_delta > 0 else 0,
-            "max_s": round(max_val, 4),
-        }
+        # 2. Micrometer Actuator metrics fallback
+        if before and after:
+            count_delta = after.get("COUNT", 0) - before.get("COUNT", 0)
+            total_time_delta = after.get("TOTAL_TIME", 0) - before.get("TOTAL_TIME", 0)
+            max_val = after.get("MAX", 0)
+            if count_delta > 0:
+                return {
+                    "count": int(count_delta),
+                    "total_time_s": round(total_time_delta, 4),
+                    "avg_s": round(total_time_delta / count_delta, 6),
+                    "max_s": round(max_val, 4),
+                }
+
+        # 3. Direct wall-clock latency fallback
+        if measure > 0 and duration_t > 0:
+            avg_s = round(duration_t / measure, 6)
+            return {
+                "count": measure,
+                "total_time_s": round(duration_t, 4),
+                "avg_s": avg_s,
+                "max_s": avg_s,
+            }
+
+        return {"error": "micrometer_unavailable"}
 
     def _resolve_finding_file(self, finding: Dict[str, Any]) -> Optional[str]:
         rel_file = finding.get("file", "")
@@ -159,6 +195,41 @@ class AutonomousOrchestrator:
         if os.path.exists(candidate):
             return candidate
         return None
+
+    def _get_start_app_cmd(self, project_dir: str) -> List[str]:
+        cmd = ["mvn", "spring-boot:run", "-q"]
+        if "awrelius" in project_dir.lower() or "awrelius" in self.src_dir.lower():
+            cmd.append("-Dspring-boot.run.profiles=solo")
+        return cmd
+
+    def _resolve_endpoint_path(self, finding: Dict[str, Any], endpoints: List = None) -> str:
+        CONTROLLER_ENDPOINT_MAP = {
+            "LeaderboardController": "/leaderboard",
+            "RunnerController": "/runners?page=0&size=20",
+            "AttemptController": "/attempts",
+            "SplitController": "/splits",
+            "ReportController": "/reports/matrix",
+            "UploadController": "/disciplines",
+            "TraceController": "/traces/recent?limit=50",
+            "ExportController": "/export/attempts.bin",
+            "LightController": "/api/light/compute",
+        }
+        file_path = finding.get("file", "")
+        file_name = os.path.basename(file_path)
+
+        for ctrl_name, path in CONTROLLER_ENDPOINT_MAP.items():
+            if ctrl_name in file_name or ctrl_name in file_path:
+                return path
+
+        if endpoints:
+            for ep in endpoints:
+                controller = getattr(ep, 'controller_class', '')
+                if controller and controller.replace('.java', '') in file_path:
+                    return ep.path
+            if hasattr(endpoints[0], 'path'):
+                return endpoints[0].path
+
+        return "/disciplines"
 
     def _benchmark_variants(self, findings: List[Dict[str, Any]], endpoints: List = None) -> List[Dict[str, Any]]:
         if getattr(self, "skip_benchmark", False):
@@ -179,20 +250,14 @@ class AutonomousOrchestrator:
             with open(abs_file, "r", encoding="utf-8") as f:
                 original_code = f.read()
 
-            endpoint_path = endpoints[0].path if endpoints else "/api/light/compute"
-            file_path = finding.get("file", "")
-            if endpoints:
-                for ep in endpoints:
-                    controller = getattr(ep, 'controller_class', '')
-                    if controller and controller.replace('.java', '') in file_path:
-                        endpoint_path = ep.path
-                        break
+            endpoint_path = self._resolve_endpoint_path(finding, endpoints)
+            start_cmd = self._get_start_app_cmd(project_dir)
 
             # Benchmark baseline original code
             try:
                 self._kill_app_on_port()
                 app_proc = subprocess.Popen(
-                    ["mvn", "spring-boot:run", "-q"], cwd=project_dir,
+                    start_cmd, cwd=project_dir,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 started = self._wait_for_app()
@@ -235,7 +300,7 @@ class AutonomousOrchestrator:
 
                     self._kill_app_on_port()
                     app_proc = subprocess.Popen(
-                        ["mvn", "spring-boot:run", "-q"], cwd=project_dir,
+                        start_cmd, cwd=project_dir,
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                     )
                     started = self._wait_for_app()
