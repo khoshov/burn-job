@@ -143,6 +143,22 @@ def detect(
 
     console.print("\n", table)
 
+    if checked_not_issue:
+        nd_table = Table(title=f"🛡️ Verified Non-Defects ({len(checked_not_issue)}) — Checked & Confirmed Safe", show_header=True, header_style="bold cyan")
+        nd_table.add_column("#", style="dim", width=4)
+        nd_table.add_column("Status", style="bold green", width=14)
+        nd_table.add_column("File Location", style="green", width=30)
+        nd_table.add_column("Claim / Pattern", style="yellow")
+        nd_table.add_column("Why Not Defect (Rationale)", style="white")
+
+        for idx, item in enumerate(checked_not_issue, 1):
+            loc_str = os.path.basename(item.get("file", ""))
+            claim = item.get("claim", "").split("\n")[0][:60]
+            why_not = item.get("why_not", "").split("\n")[0][:80]
+            nd_table.add_row(str(idx), "🛡️ NON_DEFECT", loc_str, claim, why_not)
+
+        console.print("\n", nd_table)
+
     if output_json:
         os.makedirs(os.path.dirname(os.path.abspath(output_json)) or ".", exist_ok=True)
         with open(output_json, "w", encoding="utf-8") as fp:

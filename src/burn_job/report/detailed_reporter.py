@@ -280,6 +280,21 @@ def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: 
 
             lines.append("---\n")
 
+    if checked_not_issue:
+        lines.append("## 🛡️ Проверенные паттерны не-дефектов (Verified Non-Defects)\n")
+        lines.append("> Ниже приведены конструкции кода, проанализированные детекторами и официально классифицированные как **НЕ являющиеся дефектами** производительности (Section 7 Non-Defect Classification Rules).\n")
+        lines.append("| № | Файл | Претензия / Конструкция | Обоснование (Почему это не ошибка) |")
+        lines.append("|---|---|---|---|")
+        for idx, item in enumerate(checked_not_issue, 1):
+            file_path = item.get("file", "")
+            file_name = os.path.basename(file_path)
+            claim = item.get("claim", "—").replace("\n", " ")
+            why_not = item.get("why_not", "—").replace("\n", " ")
+            abs_path = os.path.abspath(file_path) if file_path else ""
+            file_link = f"[`{file_name}`](file://{abs_path})" if abs_path else f"`{file_name}`"
+            lines.append(f"| {idx} | {file_link} | {claim} | {why_not} |")
+        lines.append("\n---\n")
+
     with open(output_path, "w", encoding="utf-8") as fp:
         fp.write("\n".join(lines))
 
@@ -294,6 +309,24 @@ def generate_html_report(findings: List[Dict[str, Any]], checked_not_issue: List
     total_findings = len(sorted_findings)
     improved_count = sum(1 for f in sorted_findings if _calculate_improvement_metrics(f)["is_improved"])
     neutral_count = total_findings - improved_count
+    non_defect_count = len(checked_not_issue) if checked_not_issue else 0
+
+    non_defect_rows = []
+    if checked_not_issue:
+        for idx, item in enumerate(checked_not_issue, 1):
+            file_path = html.escape(item.get("file", ""))
+            file_name = html.escape(os.path.basename(file_path))
+            abs_path = html.escape(os.path.abspath(file_path)) if file_path else ""
+            claim = html.escape(item.get("claim", "—"))
+            why_not = html.escape(item.get("why_not", "—"))
+            non_defect_rows.append(f"""
+            <tr>
+                <td><strong>#{idx}</strong></td>
+                <td><span class="badge badge-success">🛡️ НЕ-ДЕФЕКТ</span></td>
+                <td><a href="file://{abs_path}" class="file-link">{file_name}</a></td>
+                <td>{claim}</td>
+                <td>{why_not}</td>
+            </tr>""")
 
     top_speedup = max((_calculate_improvement_metrics(f)["pct_gain"] for f in sorted_findings), default=0.0)
 
@@ -795,8 +828,8 @@ def generate_html_report(findings: List[Dict[str, Any]], checked_not_issue: List
                 <span class="stat-val grey">{neutral_count}</span>
             </div>
             <div class="stat-card">
-                <span class="stat-label">Макс. прирост latency</span>
-                <span class="stat-val green">+{top_speedup}%</span>
+                <span class="stat-label">🛡️ Проверенные не-дефекты</span>
+                <span class="stat-val cyan">{non_defect_count}</span>
             </div>
         </section>
 
@@ -806,6 +839,7 @@ def generate_html_report(findings: List[Dict[str, Any]], checked_not_issue: List
                 <button onclick="filterFindings('all')" class="filter-btn active" id="btn-all">Все ({total_findings})</button>
                 <button onclick="filterFindings('improved')" class="filter-btn" id="btn-improved">🚀 Улучшенные ({improved_count})</button>
                 <button onclick="filterFindings('neutral')" class="filter-btn" id="btn-neutral">⚪ Без прироста ({neutral_count})</button>
+                <button onclick="filterFindings('nondefect')" class="filter-btn" id="btn-nondefect">🛡️ Не-дефекты ({non_defect_count})</button>
             </div>
         </div>
 
@@ -833,6 +867,29 @@ def generate_html_report(findings: List[Dict[str, Any]], checked_not_issue: List
             <h2 style="margin-bottom: 1.5rem;">🔍 Подробный разбор каждого узкого места</h2>
             {''.join(detail_cards)}
         </section>
+
+        {f'''<section id="non-defects-section" class="table-card" style="margin-top: 3rem;">
+            <div style="padding: 1.5rem 1.5rem 0.5rem 1.5rem;">
+                <h2 style="color: var(--accent-cyan); font-size: 1.3rem;">🛡️ Проверенные паттерны не-дефектов (Verified Non-Defects)</h2>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.4rem;">
+                    Конструкции кода, проанализированные детекторами и классифицированные как <strong>НЕ являющиеся дефектами</strong> производительности (Section 7 Non-Defect Rules).
+                </p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Статус</th>
+                        <th>Файл</th>
+                        <th>Претензия / Проверенный паттерн</th>
+                        <th>Обоснование (Почему не дефект)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(non_defect_rows)}
+                </tbody>
+            </table>
+        </section>''' if non_defect_count > 0 else ''}
     </div>
 
     <script>
