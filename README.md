@@ -142,6 +142,84 @@ cd ..
 
 ---
 
+### Шаг 5.5: Получение collapsed-профиля приложения
+
+Burn Job требует файл в формате `.collapsed` (folded stack traces) для построения графа вызовов и анализа hotspot-методов на шаге 4. Это текстовый формат, где каждая строка — уникальный стектрейс и количество сэмплов CPU:
+
+```
+com/example/MyController.handleRequest;javax/sql/DataSource.getConnection 42
+com/example/MyController.handleRequest;org/hibernate/Session.find 15
+```
+
+Есть три способа получить collapsed-файл:
+
+#### Способ A: JFR → collapsed (встроенная команда, без внешних инструментов)
+
+Если ваше Java-приложение уже запущено — снимите JFR-профиль и сконвертируйте его:
+
+```bash
+# Шаг A.1: Снять JFR-запись с running-приложения
+# PID можно найти через jps или ps aux | grep java
+./run.sh profile --pid 12345 --duration 30 --output ./app_profiling.jfr
+
+# Если PID не указать — Burn Job попробует найти Java-процесс автоматически
+./run.sh profile --duration 30 --output ./app_profiling.jfr
+
+# Шаг A.2: Конвертировать JFR в collapsed (встроенная команда)
+./run.sh jfr2collapsed ./app_profiling.jfr
+
+# Результат: появится файл ./app_profiling.collapsed в той же директории
+# Можно указать выходной путь явно:
+./run.sh jfr2collapsed ./app_profiling.jfr --output ./app_profiling_full.collapsed
+```
+
+**Что происходит внутри:**
+- `profile` запускает `jcmd PID JFR.start` с настройками `settings=profile` (CPU-семплинг с дефолтными настройками JDK), ждёт указанное количество секунд, затем вызывает `jcmd PID JFR.stop` и сохраняет файл в `.jfr` формате.
+- `jfr2collapsed` пробует найти `jfr2collapsed` из async-profiler в PATH. Если не находит — использует встроенную утилиту JDK `jfr print --json` (Java 17+), парсит JSON и сворачивает стектрейсы в collapsed-формат. Если JSON-вывод недоступен — пробует `jfr print --events ExecutionSample` с текстовым парсингом.
+
+#### Способ B: async-profiler напрямую (рекомендуется для production)
+
+async-profiler даёт более полные и точные collapsed-файлы, чем JFR:
+
+```bash
+# Скачать async-profiler: https://github.com/async-profiler/async-profiler/releases
+# Запустить приложение с Java-агентом (замените /path/to/ на реальный путь):
+java -agentpath:/path/to/libasyncProfiler.so=start,event=cpu,file=./app_profiling_full.collapsed,interval=7ms -jar your-app.jar
+```
+
+После остановки приложения collapsed-файл уже готов — конвертация не нужна. Если `jfr2collapsed` из async-profiler есть в PATH, `./run.sh jfr2collapsed` будет использовать его автоматически.
+
+#### Способ C: ручное создание (для отладки и тестирования)
+
+Если вы просто хотите проверить пайплайн без запущенного приложения и профилирования — создайте collapsed-файл вручную:
+
+```bash
+# 10 сэмплов Double.valueOf, 5 сэмплов Pattern.compile
+cat > ./app_profiling_full.collapsed << 'EOF'
+com/lighttest/web/LightController.compute;java/lang/Double.valueOf 10
+com/lighttest/web/LightController.match;java/util/regex/Pattern.compile 5
+EOF
+```
+
+#### Настройка пути в `.env`
+
+После получения collapsed-файла укажите его путь в `.env` (или оставьте значение по умолчанию):
+
+```env
+BURN_JOB_PROFILE_PATH=./app_profiling_full.collapsed
+```
+
+Если не менять — Burn Job будет искать `./app_profiling_full.collapsed` в корне проекта. Если файла нет, шаг 4 (инжест профиля) пропустится с предупреждением, но остальные шаги выполнятся.
+
+**Автоконвертация при инжесте:** если передать `.jfr` файл напрямую в `ingest` или указать `BURN_JOB_PROFILE_PATH=./app_profiling.jfr`, конвертация в collapsed произойдёт автоматически:
+
+```bash
+# ingest сам распознает .jfr и сконвертирует
+./run.sh ingest --profile ./app_profiling.jfr
+```
+
+---
+
 ### Шаг 6: Запуск полного 8-шагового цикла анализа с DeepSeek
 
 Теперь всё готово к запуску:
