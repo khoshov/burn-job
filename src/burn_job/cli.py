@@ -120,8 +120,8 @@ def detect(
         store.ingest_profile(profile_path)
 
     console.print(f"[bold cyan][*][/bold cyan] Running defect taxonomy detectors on [green]{src}[/green] and [yellow]{db}[/yellow]...")
-    anomalies = analyze_anomalies(db)
-    findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies)
+    anomalies = analyze_anomalies(db, src_dir=src)
+    findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, src_dir=src)
 
     if not findings:
         console.print(Panel("[bold green]✓ No performance defects detected[/bold green]", title="Detection Summary"))
