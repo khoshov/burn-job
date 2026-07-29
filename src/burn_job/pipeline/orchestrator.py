@@ -21,6 +21,7 @@ from burn_job.pipeline.loadtest import LoadtestGenerator
 from burn_job.graph.store import KuzuGraphStore
 from burn_job.detectors.orchestrate import analyze_anomalies
 from burn_job.report.builder import build_findings_from_anomalies, build_schema_report
+from burn_job.report.detailed_reporter import generate_markdown_report, print_findings_summary
 from burn_job.refinement.iterative_loop import run_iterative_loop
 
 logger = setup_logger("Orchestrator")
@@ -36,6 +37,7 @@ class AutonomousOrchestrator:
         host: str = DEFAULT_HOST,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         offline: bool = True,
+        apply_fixes: bool = False,
         log_path: str = RUN_LOG_PATH,
         model_path: str = None,
         backend: str = "auto",
@@ -46,6 +48,7 @@ class AutonomousOrchestrator:
         self.host = host
         self.max_iterations = max_iterations
         self.offline = offline
+        self.apply_fixes = apply_fixes
         self.log_path = log_path
         self.model_path = model_path
         self.backend = backend
@@ -88,33 +91,40 @@ class AutonomousOrchestrator:
         anomalies = analyze_anomalies(self.db_path)
         findings, checked_not_issue, _ = build_findings_from_anomalies(anomalies, run_log_path=self.log_path)
         findings_json_path = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
+        detailed_md_path = os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md")
+
         report = build_schema_report("sandbox", "hard", findings, checked_not_issue)
         os.makedirs(os.path.dirname(findings_json_path) or ".", exist_ok=True)
         with open(findings_json_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
-        logger.info(f"Exported {len(findings)} findings to {findings_json_path}")
+            json.dump(report, f, ensure_ascii=False, indent=2)
 
-        # STEP 6 & 7: LLM Refactoring Self-Optimization Loop
-        logger.info("STEP 6-7/8: Running LLM self-optimization loop...")
+        generate_markdown_report(findings, checked_not_issue, detailed_md_path)
+        logger.info(f"Exported {len(findings)} findings to {findings_json_path} and {detailed_md_path}")
+
+        # STEP 6 & 7: LLM Refactoring Self-Optimization Loop (Only if apply_fixes is True)
         modified_files = 0
-        for finding in findings:
-            rel_file = finding.get("file")
-            if not rel_file:
-                continue
-            abs_file = os.path.join(REPO_ROOT, rel_file)
-            if not os.path.exists(abs_file):
-                continue
+        if self.apply_fixes:
+            logger.info("STEP 6-7/8: Running LLM self-optimization loop (modifying code)...")
+            for finding in findings:
+                rel_file = finding.get("file")
+                if not rel_file:
+                    continue
+                abs_file = os.path.join(REPO_ROOT, rel_file)
+                if not os.path.exists(abs_file):
+                    continue
 
-            res = run_iterative_loop(
-                target_file=abs_file,
-                max_steps=self.max_iterations,
-                findings=[finding],
-                run_log_path=self.log_path,
-                verify_mvn=True,
-                agent=self.agent,
-            )
-            if res.get("success"):
-                modified_files += 1
+                res = run_iterative_loop(
+                    target_file=abs_file,
+                    max_steps=self.max_iterations,
+                    findings=[finding],
+                    run_log_path=self.log_path,
+                    verify_mvn=True,
+                    agent=self.agent,
+                )
+                if res.get("success"):
+                    modified_files += 1
+        else:
+            logger.info("STEP 6-7/8: [REPORT ONLY MODE] Code modifications skipped. Set --apply to enable automatic fixes.")
 
         # STEP 8: Final Verification & Selection
         logger.info("STEP 8/8: Verifying Maven build...")
@@ -142,16 +152,23 @@ class AutonomousOrchestrator:
             build_success = True
 
         logger.info("==================================================================")
-        logger.info(f" AUTONOMOUS OPTIMIZATION CYCLE COMPLETE!")
+        logger.info(" AUTONOMOUS OPTIMIZATION CYCLE COMPLETE!")
         logger.info(f"    - Endpoints Profiled: {len(endpoints)}")
         logger.info(f"    - Findings Detected:  {len(findings)}")
         logger.info(f"    - Files Optimized:    {modified_files}")
         logger.info(f"    - Maven Build Status: {'PASSED' if build_success else 'FAILED'}")
         logger.info("==================================================================")
 
+        # Print rich detailed CLI report
+        print_findings_summary(findings, checked_not_issue)
+
         return {
             "success": build_success,
             "endpoints_count": len(endpoints),
+            "findings_count": len(findings),
+            "modified_files": modified_files,
+            "findings_json": findings_json_path,
+            "detailed_md": detailed_md_path,
             "endpoints": [
                 {
                     "method": ep.http_method,
@@ -159,8 +176,5 @@ class AutonomousOrchestrator:
                     "handler": f"{ep.controller_class}#{ep.method_name}"
                 }
                 for ep in endpoints
-            ],
-            "findings_count": len(findings),
-            "modified_files": modified_files,
-            "build_success": build_success,
+            ]
         }

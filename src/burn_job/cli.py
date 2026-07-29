@@ -90,13 +90,15 @@ def run_cycle(
     db: str = typer.Option(DEFAULT_DB_PATH, "--db", help="Path to KuzuDB database"),
     profile: str = typer.Option(DEFAULT_PROFILE_PATH, "--profile", help="Path to profile file"),
     host: str = typer.Option(DEFAULT_HOST, "--host", help="Target API host"),
+    apply: bool = typer.Option(False, "--apply", help="Apply code fixes automatically to target project"),
     online: bool = typer.Option(False, "--online", help="Enable online LLM API calls"),
     model_path: Optional[str] = typer.Option(None, "--model-path", help="Path to local model file/directory (llama.cpp or vLLM)"),
     backend: BackendEnum = typer.Option(BackendEnum.auto, "--backend", help="LLM execution backend (auto, llama.cpp, vllm, openai)"),
 ):
+    mode_str = "[green]APPLY FIXES MODE[/green]" if apply else "[yellow]REPORT ONLY MODE (No code modified)[/yellow]"
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
-        f"Target Src: [green]{src}[/green] | Backend: [yellow]{backend.value}[/yellow] | Online: [magenta]{online}[/magenta]",
+        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]",
         title="[bold green]Starting Cycle[/bold green]"
     ))
     orchestrator = AutonomousOrchestrator(
@@ -105,11 +107,13 @@ def run_cycle(
         profile_path=profile,
         host=host,
         offline=not online,
+        apply_fixes=apply,
         model_path=model_path,
         backend=backend.value,
     )
     res = orchestrator.run()
-    findings_json = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
+    findings_json = res.get("findings_json", os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json"))
+    detailed_md = res.get("detailed_md", os.path.join(REPO_ROOT, "reports", "sandbox", "detailed_report.md"))
 
     endpoints_list = res.get("endpoints", [])
     if endpoints_list:
@@ -126,14 +130,17 @@ def run_cycle(
         console.print(Panel.fit(
             f"[bold green]✓ Cycle Completed Successfully![/bold green]\n"
             f"Endpoints Profiled: [cyan]{res.get('endpoints_count', 0)}[/cyan]\n"
-            f"Findings Detected:  [yellow]{res.get('findings_count', 0)}[/yellow]\n"
-            f"Report Generated:   [bold green]{findings_json}[/bold green]",
+            f"Findings Detected:  [bold yellow]{res.get('findings_count', 0)}[/bold yellow]\n"
+            f"Files Modified:     [magenta]{res.get('modified_files', 0)}[/magenta]\n"
+            f"JSON Report:        [bold green]{findings_json}[/bold green]\n"
+            f"Markdown Report:    [bold cyan]{detailed_md}[/bold cyan]",
             title="[bold green]Report Summary[/bold green]"
         ))
     else:
         console.print(Panel.fit(
             f"[bold yellow]! Cycle Finished with Warnings[/bold yellow]\n"
-            f"Report Generated: [bold green]{findings_json}[/bold green]",
+            f"JSON Report:     [bold green]{findings_json}[/bold green]\n"
+            f"Markdown Report: [bold cyan]{detailed_md}[/bold cyan]",
             title="[bold yellow]Report Summary[/bold yellow]"
         ))
 

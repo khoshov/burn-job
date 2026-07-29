@@ -119,7 +119,7 @@ def _build_source_method_index() -> Dict[str, List[Tuple[str, int]]]:
     for path in iter_java_files(src_root):
         text = read_file(path)
         clean = strip_comments(text)
-        rel_path = os.path.relpath(path, os.path.join(_THIS_DIR, "..", "..", "..", ".."))
+        rel_path = os.path.relpath(path, REPO_ROOT)
         for method_name, body, start_line in iter_method_bodies(text):
             index[method_name].append((rel_path, start_line))
     return dict(index)
