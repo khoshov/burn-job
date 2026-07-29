@@ -145,33 +145,54 @@ def _jfr_tool_cmd() -> list:
         alt = os.path.join(java_home, "..", "Home", "bin", "jfr")
         if os.path.isfile(alt):
             return [alt]
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        full = os.path.join(path, "jfr")
+        if os.path.isfile(full) and os.access(full, os.X_OK):
+            return [full]
+    # Common Mac OpenJDK candidate fallback
+    mac_brew = "/opt/homebrew/Cellar/openjdk/26.0.2/bin/jfr"
+    if os.path.isfile(mac_brew):
+        return [mac_brew]
     return ["jfr"]
 
 
 def _fold_text_output(text_path: str, collapsed_path: str) -> bool:
     stacks: Dict[str, int] = defaultdict(int)
     current_stack = []
-    sampling = False
-    with open(text_path) as f:
+    in_stack_trace = False
+
+    with open(text_path, "r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
-            if stripped.startswith("Event:") and "ExecutionSample" in stripped:
+            if "ExecutionSample" in stripped:
                 if current_stack:
-                    stacks[";".join(current_stack)] += 1
+                    stacks[";".join(reversed(current_stack))] += 1
                     current_stack = []
-                sampling = True
-            elif stripped.startswith("Event:") or stripped.startswith("{"):
-                if current_stack:
-                    stacks[";".join(current_stack)] += 1
-                    current_stack = []
-                sampling = False
-            elif sampling and stripped and not stripped.startswith(("---", "//", "/*")):
-                current_stack.append(stripped)
+                in_stack_trace = False
+            elif "stackTrace = [" in stripped:
+                in_stack_trace = True
+            elif in_stack_trace:
+                if stripped == "]" or stripped.startswith("}"):
+                    in_stack_trace = False
+                    if current_stack:
+                        stacks[";".join(reversed(current_stack))] += 1
+                        current_stack = []
+                elif stripped and not stripped.startswith(("---", "//", "/*")):
+                    if stripped == "...":
+                        continue
+                    frame = stripped.split(" line:")[0].strip()
+                    frame = re.sub(r"\(.*?\)", "", frame)
+                    frame = frame.replace(".", "/")
+                    if frame:
+                        current_stack.append(frame)
+
     if current_stack:
-        stacks[";".join(current_stack)] += 1
+        stacks[";".join(reversed(current_stack))] += 1
+
     if not stacks:
         return False
-    with open(collapsed_path, "w") as f:
+
+    with open(collapsed_path, "w", encoding="utf-8") as f:
         for stack, count in sorted(stacks.items(), key=lambda x: -x[1]):
             f.write(f"{stack} {count}\n")
     return True
