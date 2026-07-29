@@ -111,6 +111,17 @@ def run_cycle(
     res = orchestrator.run()
     findings_json = os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json")
 
+    endpoints_list = res.get("endpoints", [])
+    if endpoints_list:
+        table = Table(title=f"Executed Test Endpoints ({len(endpoints_list)})", show_header=True, header_style="bold magenta")
+        table.add_column("HTTP Method", style="cyan", width=12)
+        table.add_column("Path", style="green")
+        table.add_column("Controller & Method Handler", style="yellow")
+
+        for ep in endpoints_list:
+            table.add_row(ep.get("method", "GET"), ep.get("path", "/"), ep.get("handler", ""))
+        console.print("\n", table)
+
     if res.get("success"):
         console.print(Panel.fit(
             f"[bold green]✓ Cycle Completed Successfully![/bold green]\n"

@@ -141,6 +141,14 @@ class AutonomousOrchestrator:
         return {
             "success": build_success,
             "endpoints_count": len(endpoints),
+            "endpoints": [
+                {
+                    "method": ep.http_method,
+                    "path": ep.path,
+                    "handler": f"{ep.controller_class}#{ep.method_name}"
+                }
+                for ep in endpoints
+            ],
             "findings_count": len(findings),
             "modified_files": modified_files,
             "build_success": build_success,
