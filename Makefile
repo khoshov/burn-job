@@ -1,4 +1,4 @@
-.PHONY: run scan ingest test docker-build docker-run help
+.PHONY: run scan ingest profile test docker-build docker-run help
 
 run:
 	@./run.sh run-cycle
@@ -8,6 +8,9 @@ scan:
 
 ingest:
 	@./run.sh ingest
+
+profile:
+	@./run.sh profile
 
 test:
 	@.venv/bin/pytest

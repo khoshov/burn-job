@@ -127,6 +127,70 @@ def run_cycle(
         ))
 
 
+@app.command("profile", help="Generate a JFR profile from a running Java application.")
+def profile(
+    pid: Optional[str] = typer.Option(None, "--pid", "-p", help="Java process ID (auto-detected if omitted)"),
+    duration: int = typer.Option(15, "--duration", "-d", help="Recording duration in seconds"),
+    output: str = typer.Option("./app_profiling.jfr", "--output", "-o", help="Output path for .jfr file"),
+):
+    import subprocess
+    import time
+
+    target_pid = pid
+    if not target_pid:
+        try:
+            res = subprocess.run(["jcmd", "-l"], capture_output=True, text=True, timeout=5)
+            for line in res.stdout.splitlines():
+                if "burn_job" in line or "jcmd" in line:
+                    continue
+                parts = line.split()
+                if len(parts) > 0 and parts[0].isdigit():
+                    target_pid = parts[0]
+                    break
+        except Exception:
+            pass
+
+    if not target_pid:
+        console.print("[bold red][✗] No running Java process detected.[/bold red] Please specify --pid explicitly.")
+        raise typer.Exit(code=1)
+
+    recording_name = f"burn_job_jfr_{int(time.time())}"
+    console.print(Panel.fit(
+        f"Target PID:  [cyan]{target_pid}[/cyan]\n"
+        f"Duration:    [magenta]{duration}s[/magenta]\n"
+        f"Output File: [yellow]{output}[/yellow]",
+        title="[bold green]Starting JFR Profiling[/bold green]"
+    ))
+
+    try:
+        start_res = subprocess.run(
+            ["jcmd", target_pid, "JFR.start", f"name={recording_name}", "settings=profile"],
+            capture_output=True, text=True, timeout=10
+        )
+        if start_res.returncode != 0:
+            console.print(f"[bold red][✗] JFR.start failed:[/bold red] {start_res.stderr.strip()}")
+            raise typer.Exit(code=1)
+
+        with console.status(f"[bold green]Recording JFR profile for {duration} seconds...[/bold green]"):
+            time.sleep(duration)
+
+        os.makedirs(os.path.dirname(os.path.abspath(output)) or ".", exist_ok=True)
+        stop_res = subprocess.run(
+            ["jcmd", target_pid, "JFR.stop", f"name={recording_name}", f"filename={os.path.abspath(output)}"],
+            capture_output=True, text=True, timeout=10
+        )
+
+        if os.path.exists(output) and os.path.getsize(output) > 0:
+            size_mb = os.path.getsize(output) / (1024 * 1024)
+            console.print(f"[bold green][✓] JFR profile saved successfully:[/bold green] [yellow]{output}[/yellow] ({size_mb:.2f} MB)")
+        else:
+            console.print(f"[bold red][✗] JFR.stop did not generate file at {output}.[/bold red]")
+            raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"[bold red][✗] JFR profiling error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
 @app.command("version", help="Print CLI version.")
 def version():
     console.print("[bold cyan]burn-job CLI[/bold cyan] version [green]0.1.0[/green]")
