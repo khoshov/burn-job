@@ -71,14 +71,24 @@ def scan(
     console.print(table)
 
 
-@app.command("ingest", help="Ingest profiler stack traces into KuzuDB graph database.")
+@app.command("ingest", help="Ingest profiler stack traces (collapsed or JFR) into KuzuDB graph database.")
 def ingest(
-    profile: str = typer.Option(DEFAULT_PROFILE_PATH, "--profile", help="Path to collapsed profile file"),
+    profile: str = typer.Option(DEFAULT_PROFILE_PATH, "--profile", help="Path to collapsed or .jfr profile file"),
     db: str = typer.Option(DEFAULT_DB_PATH, "--db", help="Path to KuzuDB directory"),
 ):
-    console.print(f"[bold blue][*][/bold blue] Ingesting profile [green]{profile}[/green] into KuzuDB at [yellow]{db}[/yellow]...")
+    from burn_job.utils.jfr_convert import jfr_to_collapsed
+    profile_path = profile
+    if profile_path.endswith(".jfr"):
+        console.print(f"[bold yellow][!][/bold yellow] Detected JFR file, converting to collapsed first...")
+        try:
+            profile_path = jfr_to_collapsed(profile_path)
+            console.print(f"[bold green][✓][/bold green] Converted JFR to [yellow]{profile_path}[/yellow]")
+        except Exception as e:
+            console.print(f"[bold red][✗] JFR conversion failed:[/bold red] {e}")
+            raise typer.Exit(code=1)
+    console.print(f"[bold blue][*][/bold blue] Ingesting profile [green]{profile_path}[/green] into KuzuDB at [yellow]{db}[/yellow]...")
     store = KuzuGraphStore(db)
-    success = store.ingest_profile(profile)
+    success = store.ingest_profile(profile_path)
     if success:
         console.print("[bold green][✓] Profile ingested successfully into KuzuDB.[/bold green]")
     else:
@@ -150,6 +160,26 @@ def run_cycle(
             f"Markdown Report: [bold cyan]{detailed_md}[/bold cyan]",
             title="[bold yellow]Report Summary[/bold yellow]"
         ))
+
+
+@app.command("jfr2collapsed", help="Convert a JFR recording file to collapsed stack format.")
+def jfr2collapsed_cmd(
+    input: str = typer.Argument(..., help="Path to input .jfr file"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output .collapsed file path (default: input name with .collapsed)"),
+):
+    from burn_job.utils.jfr_convert import jfr_to_collapsed
+    if not os.path.isfile(input):
+        console.print(f"[bold red][✗] File not found:[/bold red] {input}")
+        raise typer.Exit(code=1)
+    if not input.endswith(".jfr"):
+        console.print(f"[bold yellow][!][/bold yellow] Input does not end with .jfr, proceeding anyway...")
+    try:
+        out = jfr_to_collapsed(input, output)
+        size_kb = os.path.getsize(out) / 1024
+        console.print(f"[bold green][✓][/bold green] Converted to [yellow]{out}[/yellow] ({size_kb:.1f} KB, {sum(1 for _ in open(out))} stacks)")
+    except Exception as e:
+        console.print(f"[bold red][✗] Conversion failed:[/bold red] {e}")
+        raise typer.Exit(code=1)
 
 
 @app.command("profile", help="Generate a JFR profile from a running Java application.")

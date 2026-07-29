@@ -245,64 +245,40 @@ cat reports/sandbox/findings.json
 
 ---
 
-### 🎯 Профилирование: как получить `.collapsed` файл
+### 🎯 Конвертация JFR → collapsed
 
-Burn Job работает с форматом `.collapsed` (folded stack traces) — текстовый формат, где каждая строка выглядит так:
-
-```
-frame1;frame2;...;frameN count
-```
-
-Этот формат используется async-profiler и требуется для инжеста в графовую БД KùzuDB (шаг 4). Есть три способа его получить:
-
-#### Способ 1: async-profiler (рекомендуется, даёт полный collapsed)
-
-Скачайте [async-profiler](https://github.com/async-profiler/async-profiler/releases) и запустите JVM-приложение с Java-агентом:
+Burn Job работает с форматом `.collapsed` (folded stack traces). Если у вас есть JFR-файл (JDK Flight Recorder), конвертируйте его в collapsed встроенной командой:
 
 ```bash
-# CPU profiling (семплинг по CPU): захватывает стектрейсы каждые 7ms
-java -agentpath:/path/to/libasyncProfiler.so=start,event=cpu,file=profile.collapsed,interval=7ms -jar app.jar
+# Конвертировать JFR в collapsed
+./run.sh jfr2collapsed ./app_profiling.jfr
 
-# Allocation profiling (семплинг по аллокациям): захватывает стектрейсы при выделении памяти
-java -agentpath:/path/to/libasyncProfiler.so=start,event=alloc,file=profile_alloc.collapsed -jar app.jar
-
-# Lock profiling (семплинг по блокировкам)
-java -agentpath:/path/to/libasyncProfiler.so=start,event=lock,file=profile_lock.collapsed -jar app.jar
+# Или указать имя выходного файла
+./run.sh jfr2collapsed ./app_profiling.jfr --output ./profile.collapsed
 ```
 
-После остановки приложения в текущей директории появится файл `profile.collapsed` — его можно передать в `run.sh ingest` или указать в `.env` как `BURN_JOB_PROFILE_PATH`.
+Команда пробует несколько способов конвертации в порядке приоритета:
 
-#### Способ 2: JFR → collapsed конвертация через async-profiler
+1. **`jfr2collapsed`** из [async-profiler](https://github.com/async-profiler/async-profiler) (если установлен в PATH) — самый надёжный способ
+2. **`asprof jfr2collapsed`** — unified-бинарник async-profiler (если установлен в PATH)
+3. **`jfr print --json`** — встроенный инструмент JDK (Java 17+), парсинг JSON и сворачивание стектрейсов в Python
+4. **`jfr print --events ExecutionSample`** — текстовый вывод JDK-утилиты с парсингом в Python
 
-Если у вас уже есть JFR-файл (например, снятый через `./run.sh profile`), конвертируйте его в collapsed с помощью утилиты `jfr2collapsed` из комплекта async-profiler:
+После конвертации файл можно передать в `ingest` или указать в `.env` как `BURN_JOB_PROFILE_PATH`. Если в `ingest` передать `.jfr` файл напрямую — конвертация произойдёт автоматически:
 
 ```bash
-# Снять JFR (встроенная команда)
-./run.sh profile --duration 15 --output ./app_profiling.jfr
-
-# Конвертировать JFR в collapsed (утилита из async-profiler)
-# После распаковки async-profiler:
-/path/to/async-profiler/bin/jfr2collapsed ./app_profiling.jfr > ./app_profiling_full.collapsed
-
-# Теперь .collapsed можно использовать
-./run.sh ingest --profile ./app_profiling_full.collapsed
+# Автоконвертация: ingest сам распознает .jfr и сконвертирует в collapsed
+./run.sh ingest --profile ./app_profiling.jfr
 ```
 
-**Что внутри:** `jfr2collapsed` читает JFR-файл (бинарный формат JDK Flight Recorder), извлекает все события `ExecutionSample` (CPU-семплы), группирует одинаковые стектрейсы и записывает их в folded-формат. Каждая строка — уникальный стектрейс и количество сэмплов.
+**Что внутри collapsed:** текстовый формат, где каждая строка — уникальный стектрейс (фреймы через `;`) и количество сэмплов:
 
-#### Способ 3: Ручное создание collapsed для отладки (без реального профилирования)
-
-Если вы хотите просто протестировать пайплайн без запуска реального профайлера, можно создать collapsed-файл вручную или сгенерировать его через Python:
-
-```bash
-# Минимальный collapsed для теста (10 сэмплов в методе compute, 5 в match)
-cat > ./app_profiling_full.collapsed << 'EOF'
+```
 com/lighttest/web/LightController.compute;java/lang/Double.valueOf 10
 com/lighttest/web/LightController.match;java/util/regex/Pattern.compile 5
-EOF
 ```
 
-В папке `profiles/` репозитория есть примеры реальных `.collapsed`-файлов, которые можно использовать для тестового прогона без запуска приложения.
+Для отладки без реального профилирования можно создать collapsed-файл вручную:
 
 ---
 
