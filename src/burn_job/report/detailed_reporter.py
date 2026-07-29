@@ -40,6 +40,14 @@ def _compile_badge(v: Dict[str, Any]) -> str:
 def _explain_winner_selection(variants: List[Dict[str, Any]], winner: Dict[str, Any]) -> str:
     if not variants or not winner:
         return "Победитель выбран как первый вариант по умолчанию (нет данных для сравнения)."
+    bench_scored = [v for v in variants if v.get("benchmark", {}).get("avg_s") is not None]
+    if bench_scored:
+        reasons = []
+        for v in sorted(bench_scored, key=lambda x: x["benchmark"]["avg_s"]):
+            tag = "🏆" if v.get("is_winner") else " "
+            reasons.append(f"{tag} «{v['strategy']}»: {v['benchmark']['avg_s']}s avg")
+        reasons.append(f"Победитель по benchmark: «{winner['strategy']}» ({winner['benchmark']['avg_s']}s)")
+        return ". ".join(reasons) + "."
     scored = [v for v in variants if v.get("score") is not None]
     if not scored:
         return "Победитель выбран как первый вариант (варианты не были оценены — нет LLM или AST-данных)."
@@ -99,7 +107,6 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
             sections.append("[bold green]📋 Variants Tested:[/bold green]")
             for v in variants:
                 s = _safe(v.get("score"))
-                c = _compile_badge(v)
                 marker = "🏆" if v.get("is_winner") else " "
                 bm = v.get("benchmark", {})
                 if bm.get("avg_s") is not None:
@@ -108,7 +115,7 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
                     bm_str = " ⏱ error"
                 else:
                     bm_str = ""
-                sections.append(f"  {marker} [{c}] [bold]{v['strategy']}[/bold] — AST Score: [cyan]{s}[/cyan]{bm_str}")
+                sections.append(f"  {marker} [bold]{v['strategy']}[/bold] — AST Score: [cyan]{s}[/cyan]{bm_str}")
                 gen_code = v.get("generated_code")
                 if gen_code:
                     label = "wins" if v.get("is_winner") else "alt"
@@ -116,8 +123,10 @@ def print_findings_summary(findings: List[Dict[str, Any]], checked_not_issue: Li
                     sections.append(f"    [dim]└ Generated ({label}): {first_line[:80]}{'…' if len(first_line) > 80 else ''}[/dim]")
 
         if winner:
+            w_bm = winner.get("benchmark", {})
+            w_bm_str = f" ⏱ {w_bm['avg_s']}s" if w_bm.get("avg_s") is not None else ""
             sections.append("")
-            sections.append(f"[bold green]🏆 Winner:[/bold green] {w_strategy} (Score: [cyan]{w_score}[/cyan])")
+            sections.append(f"[bold green]🏆 Winner:[/bold green] {w_strategy} (Score: [cyan]{w_score}[/cyan]{w_bm_str})")
             sections.append(f"[dim]{_explain_winner_selection(variants, winner)}[/dim]")
 
         console.print(Panel(
@@ -199,11 +208,10 @@ def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: 
 
             if variants:
                 lines.append("#### 🛠️ Сравнение вариантов исправлений\n")
-                lines.append("| Вариант | AST Score | Бенчмарк (avg) | Компиляция | Результат |")
-                lines.append("|---|---|---|---|---|")
+                lines.append("| Вариант | AST Score | Бенчмарк (avg) | Результат |")
+                lines.append("|---|---|---|---|")
                 for v in variants:
                     s = _safe(v.get("score"))
-                    c = {True: "✅", False: "❌", None: "—"}.get(v.get("compiles"), "—")
                     marker = "🏆 **Победитель**" if v.get("is_winner") else "⚪ Альтернатива"
                     bm = v.get("benchmark", {})
                     if bm.get("avg_s") is not None:
@@ -212,7 +220,7 @@ def generate_markdown_report(findings: List[Dict[str, Any]], checked_not_issue: 
                         bm_str = "❌ " + bm["error"]
                     else:
                         bm_str = "—"
-                    lines.append(f"| **{v['strategy']}** | `{s}` | `{bm_str}` | {c} | {marker} |")
+                    lines.append(f"| **{v['strategy']}** | `{s}` | `{bm_str}` | {marker} |")
                 lines.append("")
 
                 for v in variants:

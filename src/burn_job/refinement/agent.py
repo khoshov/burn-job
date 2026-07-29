@@ -302,7 +302,7 @@ class LLMAgent:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
         self.logger.log("INFO", f"Calling external LLM API at {self.base_url} model={payload['model']}...")
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
@@ -319,7 +319,7 @@ class LLMAgent:
             raise
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
-        max_tokens = 4096
+        max_tokens = 8192
 
         if self.vllm_engine is not None:
             self.logger.log("INFO", "Executing inference via local python vLLM engine...")
@@ -389,15 +389,17 @@ class LLMAgent:
 
     def extract_multi_code_blocks(self, llm_response: str) -> Dict[str, str]:
         candidates = {}
-        pattern = r"\[VARIANT_(\d+)\]\s*```java\s*\n(.*?)\n```"
+        pattern = r"\[VARIANT_(\d+)\].*?```java\s*\n(.*?)\n```"
         matches = re.findall(pattern, llm_response, re.DOTALL)
         if matches:
             for idx, code in matches:
-                candidates[f"v{idx}"] = code
+                clean = re.sub(r"^\[VARIANT_\d+\].*", "", code).strip()
+                candidates[f"v{idx}"] = clean
         else:
             blocks = re.findall(r"```java\s*\n(.*?)\n```", llm_response, re.DOTALL)
             for idx, code in enumerate(blocks, start=1):
-                candidates[f"v{idx}"] = code
+                clean = re.sub(r"^\[VARIANT_\d+\].*", "", code).strip()
+                candidates[f"v{idx}"] = clean
 
         if not candidates:
             single = self.extract_code_block(llm_response)

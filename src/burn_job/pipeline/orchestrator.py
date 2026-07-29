@@ -229,6 +229,18 @@ class AutonomousOrchestrator:
 
         self._kill_app_on_port()
         logger.info("Benchmark complete, restoring original code")
+        for finding in findings:
+            variants = finding.get("variants", [])
+            if not variants:
+                continue
+            for v in variants:
+                v["is_winner"] = False
+            scored = [v for v in variants if v.get("benchmark", {}).get("avg_s") is not None]
+            if scored:
+                scored.sort(key=lambda v: v["benchmark"]["avg_s"])
+                scored[0]["is_winner"] = True
+                finding["winner"] = scored[0]
+                logger.info(f"  Re-selected winner by benchmark: {scored[0]['strategy']} (avg={scored[0]['benchmark']['avg_s']}s)")
         return findings
 
     def _find_project_dir(self) -> Optional[str]:
