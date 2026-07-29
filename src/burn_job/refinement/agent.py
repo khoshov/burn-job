@@ -83,11 +83,25 @@ class LLMAgentLogger:
             f.write(formatted)
 
 
+DEFAULT_SERVER_PORT = 8081
+
+
+def resolve_model_path(model_path: Optional[str] = None) -> Optional[str]:
+    """Resolve GGUF model path from explicit arg or env vars, or auto-detect in workspace."""
+    if model_path and os.path.exists(model_path):
+        return model_path
+    for env_var in ("BURN_JOB_MODEL_PATH", "LLAMA_CPP_MODEL_PATH", "GGUF_MODEL_PATH"):
+        val = os.getenv(env_var)
+        if val and os.path.exists(val):
+            return val
+    return find_default_model_path()
+
+
 def find_default_model_path() -> Optional[str]:
     """Search for existing GGUF model files in the workspace."""
     candidate_dirs = [
-        os.path.join(REPO_ROOT, "Qwen3-4B "),
         os.path.join(REPO_ROOT, "Qwen3-4B"),
+        os.path.join(REPO_ROOT, "Qwen3-4B "),
         os.path.join(REPO_ROOT, "models"),
         REPO_ROOT,
     ]
@@ -97,6 +111,86 @@ def find_default_model_path() -> Optional[str]:
                 if f.endswith(".gguf"):
                     return os.path.join(d, f)
     return None
+
+
+def is_local_server_running(port: int = DEFAULT_SERVER_PORT) -> bool:
+    """Check if a llama.cpp server is already running on localhost:port."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://localhost:{port}/v1/models", method="GET")
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+SECTION_CONTEXT_LINES = 3
+
+
+def extract_section_for_finding(
+    abs_file: str,
+    finding: dict,
+    methods: Optional[List[Tuple[str, str, int]]] = None,
+) -> Tuple[str, int, int]:
+    """Extract the method/code section around a finding's line range.
+
+    Tries to find the enclosing method via iter_method_bodies; falls back
+    to a window with SECTION_CONTEXT_LINES of context.
+    Returns (section_text, section_start_line_1idx, section_end_line_1idx).
+    """
+    with open(abs_file, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    total = len(lines)
+    lf = finding.get("line_from") or 1
+    lt = finding.get("line_to") or total
+
+    if methods is None:
+        from burn_job.detectors._shared import iter_method_bodies
+        with open(abs_file, "r", encoding="utf-8") as f:
+            methods = iter_method_bodies(f.read())
+
+    for name, body, body_start_line in methods:
+        body_end_line = body_start_line + body.count("\n")
+        if body_start_line <= lf <= body_end_line or body_start_line <= lt <= body_end_line:
+            sig_start = max(0, _find_signature_start(lines, body_start_line - 1))
+            sec_start = sig_start + 1
+            sec_end = min(total, body_end_line)
+            section = "\n".join(lines[sec_start - 1:sec_end])
+            self_contained_line = body_start_line
+            return section, sec_start, sec_end
+
+    start = max(1, lf - SECTION_CONTEXT_LINES)
+    end = min(total, lt + SECTION_CONTEXT_LINES)
+    return "\n".join(lines[start - 1:end]), start, end
+
+
+def _find_signature_start(lines: List[str], brace_line: int) -> int:
+    """Walk backwards from the opening-brace line to find the method declaration start."""
+    i = brace_line - 1
+    annotations = 0
+    while i >= 0:
+        stripped = lines[i].strip()
+        if not stripped:
+            i -= 1
+            continue
+        if stripped.startswith("@") or stripped.startswith("//"):
+            annotations += 1
+            i -= 1
+            continue
+        if stripped.endswith(")"):
+            i -= 1
+            continue
+        break
+    candidate = max(0, i - 2)
+    return candidate
+
+
+def apply_section_patch(original_code: str, sec_start: int, sec_end: int, new_section: str) -> str:
+    """Replace lines sec_start..sec_end in original_code with new_section."""
+    original_lines = original_code.splitlines(keepends=False)
+    new_lines = new_section.splitlines(keepends=False)
+    patched = original_lines[:sec_start - 1] + new_lines + original_lines[sec_end:]
+    return "\n".join(patched)
 
 
 class LLMAgent:
@@ -110,9 +204,17 @@ class LLMAgent:
         n_ctx: int = 8192,
         n_gpu_layers: int = -1,
         logger: LLMAgentLogger = None,
+        quick: bool = False,
+        server_port: int = None,
     ):
         self.logger = logger or LLMAgentLogger()
         self.backend = (backend or os.getenv("BURN_JOB_BACKEND") or "auto").lower()
+        self.quick = quick
+
+        if quick:
+            n_ctx = min(n_ctx, 2048)
+            self.logger.log("INFO", f"Quick mode: n_ctx={n_ctx}")
+
         self.model_path = (
             model_path
             or os.getenv("BURN_JOB_MODEL_PATH")
@@ -124,9 +226,16 @@ class LLMAgent:
         self.llama_model = None
         self.vllm_engine = None
 
+        # Auto-detect local server if backend is auto/llama.cpp and no explicit model_path
+        server_port = server_port or DEFAULT_SERVER_PORT
+        if self.backend in ("llama.cpp", "auto") and not model_path and is_local_server_running(port=server_port):
+            self.logger.log("INFO", f"Detected running llama.cpp server on :{server_port}, connecting via HTTP...")
+            self.backend = "openai"
+            base_url = f"http://localhost:{server_port}/v1"
+
         # Check vLLM backend direct load
         if self.backend in ("vllm", "auto") and not self.llama_model:
-            vllm_target = self.model_path or (REPO_ROOT if os.path.exists(os.path.join(REPO_ROOT, "Qwen3-4B ", "config.json")) else None)
+            vllm_target = self.model_path or (REPO_ROOT if os.path.exists(os.path.join(REPO_ROOT, "Qwen3-4B", "config.json")) else None)
             if vllm_target or self.backend == "vllm":
                 try:
                     from vllm import LLM, SamplingParams
@@ -136,8 +245,9 @@ class LLMAgent:
                     self.vllm_sampling_params = SamplingParams(temperature=0.2, max_tokens=4096)
                     self.logger.log("SUCCESS", "Local vLLM engine initialized successfully.")
                 except ImportError:
-                    if self.backend == "vllm":
-                        self.logger.log("WARNING", "vllm package not installed. Install via `pip install vllm`.")
+                    if self.backend == "vllm" or (vllm_target and os.path.isdir(vllm_target)):
+                        hint = f"Model at '{vllm_target}' is a HuggingFace safetensors directory. vLLM package not installed. Run: pip install vllm"
+                        self.logger.log("WARNING", hint)
                 except Exception as e:
                     self.logger.log("ERROR", f"Failed to initialize vLLM engine: {str(e)}")
 
@@ -146,22 +256,31 @@ class LLMAgent:
             if not self.model_path:
                 self.model_path = find_default_model_path()
 
-            if self.model_path and os.path.exists(self.model_path):
-                self.logger.log("INFO", f"Initializing local llama.cpp engine with model: {self.model_path}")
-                try:
-                    from llama_cpp import Llama
-                    self.llama_model = Llama(
-                        model_path=self.model_path,
-                        n_ctx=n_ctx,
-                        n_gpu_layers=n_gpu_layers,
-                        verbose=False,
-                    )
-                    self.logger.log("SUCCESS", f"Local llama.cpp engine initialized (model={os.path.basename(self.model_path)}).")
-                except ImportError:
-                    if self.backend == "llama.cpp":
-                        self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
-                except Exception as e:
-                    self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
+            if self.model_path:
+                if os.path.isdir(self.model_path) and os.path.exists(os.path.join(self.model_path, "config.json")):
+                    self.logger.log("WARNING", f"Model path '{self.model_path}' is a HuggingFace safetensors directory. "
+                                   "llama.cpp requires a GGUF file. Either:\n"
+                                   "  - Convert to GGUF: python -c 'from transformers import AutoTokenizer, AutoModelForCausalLM; ...'\n"
+                                   "  - Or install vLLM: pip install vllm\n"
+                                   "  - Or set BURN_JOB_MODEL_PATH to a .gguf file")
+                elif os.path.isfile(self.model_path) and not self.model_path.endswith(".gguf"):
+                    self.logger.log("WARNING", f"Model file '{self.model_path}' is not a .gguf file. llama.cpp requires GGUF format.")
+                elif os.path.exists(self.model_path):
+                    self.logger.log("INFO", f"Initializing local llama.cpp engine with model: {self.model_path}")
+                    try:
+                        from llama_cpp import Llama
+                        self.llama_model = Llama(
+                            model_path=self.model_path,
+                            n_ctx=n_ctx,
+                            n_gpu_layers=n_gpu_layers,
+                            verbose=False,
+                        )
+                        self.logger.log("SUCCESS", f"Local llama.cpp engine initialized (model={os.path.basename(self.model_path)}).")
+                    except ImportError:
+                        if self.backend == "llama.cpp":
+                            self.logger.log("WARNING", "llama-cpp-python package not found. Install via `pip install llama-cpp-python`.")
+                    except Exception as e:
+                        self.logger.log("ERROR", f"Failed to load llama.cpp model from {self.model_path}: {str(e)}")
 
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GIGACHAT_API_KEY") or os.getenv("LLM_API_KEY")
         default_base_url = "https://api.deepseek.com/v1" if (self.api_key and "deepseek" in (base_url or "").lower()) or os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
@@ -174,6 +293,8 @@ class LLMAgent:
         return (self.vllm_engine is not None) or (self.llama_model is not None) or bool(self.api_key)
 
     def call_llm(self, prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
+        max_tokens = 1024 if self.quick else 4096
+
         if self.vllm_engine is not None:
             self.logger.log("INFO", "Executing inference via local python vLLM engine...")
             try:
@@ -193,7 +314,7 @@ class LLMAgent:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.2,
-                    max_tokens=4096,
+                    max_tokens=max_tokens,
                 )
                 return response["choices"][0]["message"]["content"]
             except Exception as e:
@@ -214,7 +335,8 @@ class LLMAgent:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
         }
 
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
@@ -276,6 +398,12 @@ class LLMAgent:
         with open(abs_file, "r", encoding="utf-8") as f:
             original_code = f.read()
 
+        import burn_job.detectors._shared as _shared
+
+        section_text, sec_start, sec_end = extract_section_for_finding(
+            abs_file, finding, methods=_shared.iter_method_bodies(original_code)
+        )
+
         candidates = {}
 
         if multi_variant or enable_jfr:
@@ -286,16 +414,22 @@ Line Range: {finding.get('line_from')} to {finding.get('line_to')}
 Taxonomy Codes: {finding.get('pdf_taxonomy')}
 Mechanism / Bottleneck: {finding.get('mechanism')}
 
-Existing Java File Content:
+Relevant code section (lines {sec_start}-{sec_end}):
 ```java
-{original_code}
+{section_text}
 ```
-Please output 3 distinct refactoring candidates according to Multi-Variant instructions."""
+Output 3 distinct refactoring candidates for the code section above.
+Each variant must be a complete, drop-in replacement for lines {sec_start}-{sec_end}."""
                 try:
                     self.logger.log("INFO", f"Requesting multi-variant options from LLM ({self.model})...")
                     resp = self.call_llm(prompt, system_prompt=SYSTEM_MULTI_VARIANT_PROMPT)
                     candidates = self.extract_multi_code_blocks(resp)
                     self.logger.log("INFO", f"Extracted {len(candidates)} candidate variant(s) from LLM.")
+
+                    candidates_full = {}
+                    for vname, vcode in candidates.items():
+                        candidates_full[vname] = apply_section_patch(original_code, sec_start, sec_end, vcode)
+                    candidates = candidates_full
                 except Exception as e:
                     self.logger.log("WARNING", f"LLM Multi-Variant call failed ({e}).")
 
@@ -346,21 +480,22 @@ Please output 3 distinct refactoring candidates according to Multi-Variant instr
             return True
 
         else:
-            new_code = None
+            new_section_code = None
             if self.is_api_configured():
                 prompt = f"""Target File: {rel_file}
 Line Range: {finding.get('line_from')} to {finding.get('line_to')}
 Taxonomy Codes: {finding.get('pdf_taxonomy')}
 Mechanism / Bottleneck: {finding.get('mechanism')}
 
-Existing Java File Content:
+Relevant code section (lines {sec_start}-{sec_end}):
 ```java
-{original_code}
+{section_text}
 ```
-Please rewrite the entire Java file with the optimal implementation."""
+Output ONLY the replacement code for lines {sec_start}-{sec_end} — the refactored section.
+IMPORTANT: Output the complete replacement method/block that can be substituted directly into the file."""
                 try:
                     llm_response = self.call_llm(prompt)
-                    new_code = self.extract_code_block(llm_response)
+                    new_section_code = self.extract_code_block(llm_response)
                 except Exception as e:
                     self.logger.log("WARNING", f"LLM call failed ({e}).")
 
@@ -368,11 +503,15 @@ Please rewrite the entire Java file with the optimal implementation."""
                 self.logger.log("INFO", f"[DRY RUN] Would write updated content to {rel_file}.")
                 return True
 
-            with open(abs_file, "w", encoding="utf-8") as f:
-                f.write(new_code)
-
-            self.logger.log("SUCCESS", f"Successfully applied refactoring to {rel_file}.")
-            return True
+            if new_section_code and len(new_section_code.strip()) > 10:
+                new_code = apply_section_patch(original_code, sec_start, sec_end, new_section_code)
+                with open(abs_file, "w", encoding="utf-8") as f:
+                    f.write(new_code)
+                self.logger.log("SUCCESS", f"Successfully applied refactoring to {rel_file}.")
+                return True
+            else:
+                self.logger.log("WARNING", "Generated replacement code is empty or too short. Skipping.")
+                return False
 
     def verify_maven_build(self, root_dir: str) -> bool:
         self.logger.log("INFO", "Executing Maven verification (mvn test-compile)...")
@@ -416,6 +555,8 @@ def main():
     parser.add_argument("--n-gpu-layers", type=int, default=-1, help="Number of GPU layers to offload (-1 for all)")
     parser.add_argument("--api-key", help="API key for LLM provider")
     parser.add_argument("--base-url", help="Base URL for OpenAI-compatible LLM endpoint (or vLLM server http://localhost:8000/v1)")
+    parser.add_argument("--quick", action="store_true", help="Fast mode: reduced context (2048), fewer tokens")
+    parser.add_argument("--server-port", type=int, default=None, help="Port of a running llama.cpp server to connect to")
     parser.add_argument("--dry-run", action="store_true", help="Perform analysis without writing changes to disk")
     parser.add_argument("--no-verify", action="store_true", help="Skip Maven compilation verification")
     parser.add_argument("--multi-variant", action="store_true", help="Generate all possible candidate variants for each bottleneck")
@@ -452,6 +593,8 @@ def main():
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
         logger=logger,
+        quick=args.quick,
+        server_port=args.server_port,
     )
 
     if args.iterative:

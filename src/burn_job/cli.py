@@ -17,6 +17,8 @@ from burn_job.core.config import (
     DEFAULT_DB_PATH,
     DEFAULT_PROFILE_PATH,
     DEFAULT_HOST,
+    DEFAULT_N_CTX,
+    DEFAULT_N_GPU_LAYERS,
 )
 from burn_job.core.logging import setup_logger
 from burn_job.pipeline.scanner import ControllerScanner
@@ -94,11 +96,14 @@ def run_cycle(
     online: bool = typer.Option(False, "--online", help="Enable online LLM API calls"),
     model_path: Optional[str] = typer.Option(None, "--model-path", help="Path to local model file/directory (llama.cpp or vLLM)"),
     backend: BackendEnum = typer.Option(BackendEnum.auto, "--backend", help="LLM execution backend (auto, llama.cpp, vllm, openai)"),
+    quick: bool = typer.Option(False, "--quick", help="Fast mode: reduced context (2048), fewer tokens, skip non-essential steps"),
+    server_port: Optional[int] = typer.Option(None, "--server-port", help="Connect to running llama.cpp server on port (overrides auto-detect)"),
 ):
     mode_str = "[green]APPLY FIXES MODE[/green]" if apply else "[yellow]REPORT ONLY MODE (No code modified)[/yellow]"
+    quick_str = " [red][QUICK][/red]" if quick else ""
     console.print(Panel.fit(
         "[bold cyan]Burn Job — Autonomous Optimization Cycle[/bold cyan]\n"
-        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]",
+        f"Target Src: [green]{src}[/green] | Mode: {mode_str} | Backend: [yellow]{backend.value}[/yellow]{quick_str}",
         title="[bold green]Starting Cycle[/bold green]"
     ))
     orchestrator = AutonomousOrchestrator(
@@ -110,6 +115,8 @@ def run_cycle(
         apply_fixes=apply,
         model_path=model_path,
         backend=backend.value,
+        quick=quick,
+        server_port=server_port,
     )
     res = orchestrator.run()
     findings_json = res.get("findings_json", os.path.join(REPO_ROOT, "reports", "sandbox", "findings.json"))
@@ -206,6 +213,52 @@ def profile(
             raise typer.Exit(code=1)
     except Exception as e:
         console.print(f"[bold red][✗] JFR profiling error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("llm-server", help="Start persistent llama.cpp OpenAI-compatible server.")
+def llm_server(
+    port: int = typer.Option(8081, "--port", "-p", help="Server listening port"),
+    host: str = typer.Option("localhost", "--host", help="Server bind address"),
+    model_path: Optional[str] = typer.Option(None, "--model-path", help="Path to GGUF model file"),
+    n_ctx: int = typer.Option(DEFAULT_N_CTX, "--n-ctx", help="Context window size"),
+    n_gpu_layers: int = typer.Option(DEFAULT_N_GPU_LAYERS, "--n-gpu-layers", help="GPU layers to offload (-1 = all)"),
+):
+    from burn_job.refinement.agent import resolve_model_path
+
+    resolved = resolve_model_path(model_path)
+    if not resolved:
+        console.print("[bold red][✗] No GGUF model found. Specify --model-path or set BURN_JOB_MODEL_PATH.[/bold red]")
+        raise typer.Exit(code=1)
+
+    console.print(Panel.fit(
+        f"[bold green]Starting llama.cpp server[/bold green]\n"
+        f"Model: [yellow]{resolved}[/yellow]\n"
+        f"Host:  [cyan]{host}:{port}[/cyan]\n"
+        f"n_ctx: [magenta]{n_ctx}[/magenta]  n_gpu_layers: [magenta]{n_gpu_layers}[/magenta]",
+        title="[bold cyan]LLM Server[/bold cyan]"
+    ))
+
+    try:
+        from llama_cpp.server.app import create_app
+        from llama_cpp.server.settings import Settings
+        import uvicorn
+
+        settings = Settings(
+            model=resolved,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+        )
+        app_instance = create_app(settings=settings)
+        console.print(f"[bold green][✓][/bold green] Server ready at [underline]http://{host}:{port}/v1[/underline]")
+        console.print("  Use: [bold]burn-job run-cycle --backend openai --base-url http://localhost:{}/v1[/bold]".format(port))
+        uvicorn.run(app_instance, host=host, port=port, log_level="info")
+    except ImportError as e:
+        console.print(f"[bold red][✗] Missing dependency: {e}[/bold red]")
+        console.print("  Install: pip install llama-cpp-python[server]")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"[bold red][✗] Server error: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 

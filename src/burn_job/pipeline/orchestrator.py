@@ -42,6 +42,8 @@ class AutonomousOrchestrator:
         log_path: str = RUN_LOG_PATH,
         model_path: str = None,
         backend: str = "auto",
+        quick: bool = False,
+        server_port: int = None,
     ):
         self.src_dir = src_dir
         self.db_path = db_path
@@ -53,9 +55,21 @@ class AutonomousOrchestrator:
         self.log_path = log_path
         self.model_path = model_path
         self.backend = backend
+        self.quick = quick
         self.graph_store = KuzuGraphStore(db_path)
         from burn_job.refinement.agent import LLMAgent
-        self.agent = LLMAgent(model_path=model_path, backend=backend) if not offline or model_path or backend in ("vllm", "llama.cpp") else None
+
+        env_model_path = model_path or os.getenv("BURN_JOB_MODEL_PATH") or os.getenv("LLAMA_CPP_MODEL_PATH")
+        env_backend = backend if backend != "auto" else os.getenv("BURN_JOB_BACKEND", "auto")
+        has_model_or_api = (
+            env_model_path
+            or os.getenv("DEEPSEEK_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("LLM_API_KEY")
+        )
+        self.agent = LLMAgent(model_path=env_model_path, backend=env_backend, quick=quick, server_port=server_port) if (
+            not offline or has_model_or_api or env_backend in ("vllm", "llama.cpp")
+        ) else None
 
     def _find_project_dir(self) -> Optional[str]:
         current_dir = os.path.abspath(self.src_dir)

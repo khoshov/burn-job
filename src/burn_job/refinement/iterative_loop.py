@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from burn_job.detectors.complexity import analyze_complexity
 
@@ -70,6 +70,30 @@ def score_candidate(code: str, complexity_res: dict) -> float:
     return max(score, 0.0)
 
 
+def _extract_section_bounds(target_file: str, findings: list) -> Tuple[int, int]:
+    """Determine the line range to send to the LLM based on findings."""
+    with open(target_file, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    total = len(lines)
+    lf = 1
+    lt = total
+    if findings:
+        lf = max(1, (findings[0].get("line_from") or 1) - 3)
+        lt = min(total, (findings[0].get("line_to") or total) + 3)
+
+    from burn_job.detectors._shared import iter_method_bodies
+    with open(target_file, "r", encoding="utf-8") as f:
+        methods = iter_method_bodies(f.read())
+    for name, body, body_start in methods:
+        body_end = body_start + body.count("\n")
+        if body_start <= lf <= body_end or body_start <= lt <= body_end:
+            sig_start = max(body_start - 4, 1)
+            lf = sig_start
+            lt = min(total, body_end)
+            break
+    return lf, lt
+
+
 def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = None,
                        run_log_path: str = None, verify_mvn: bool = True,
                        agent: Any = None) -> dict:
@@ -80,45 +104,48 @@ def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = No
 
     with open(target_file, "r", encoding="utf-8") as f:
         original_code = f.read()
+    original_lines = original_code.splitlines(keepends=False)
 
-    current_code = original_code
+    sec_start, sec_end = _extract_section_bounds(target_file, findings or [])
+    if logger:
+        logger.log("INFO", f"Section bounds: lines {sec_start}-{sec_end} of {len(original_lines)}")
+
     consecutive_errors = 0
     step_log = []
 
     for step in range(max_steps):
         step_entry = {"step": step + 1, "action": "", "result": ""}
 
-        if current_code != original_code:
-            complexity_result = analyze_complexity(current_code)
-        else:
-            complexity_result = analyze_complexity(original_code)
+        current_section = "\n".join(original_lines[sec_start - 1:sec_end])
+        complexity_result = analyze_complexity(current_section)
 
         prompt = render_prompt("generator_prompt.jinja2", {
-            "code": current_code,
+            "code": current_section,
             "findings": findings or [],
             "complexity_analysis": complexity_result,
             "evaluator_feedback": step_log[-1].get("evaluator_feedback", "") if step_log else "",
         })
 
+        new_section = None
         if agent and hasattr(agent, "call_llm") and agent.is_api_configured():
             try:
                 llm_res = agent.call_llm(prompt)
-                new_code = agent.extract_code_block(llm_res)
+                new_section = agent.extract_code_block(llm_res)
             except Exception as e:
                 if logger:
                     logger.log("WARNING", f"LLM call in iterative loop failed: {e}")
-                new_code = current_code
-        else:
-            new_code = prompt
 
-        if not new_code or len(new_code.strip()) < 10:
+        if not new_section or len(new_section.strip()) < 10:
             step_entry["result"] = "generated_code_too_short"
             step_log.append(step_entry)
             break
 
+        patched_lines = original_lines[:sec_start - 1] + new_section.splitlines(keepends=False) + original_lines[sec_end:]
+        patched_code = "\n".join(patched_lines)
+
         if verify_mvn:
             with open(target_file, "w", encoding="utf-8") as f:
-                f.write(new_code)
+                f.write(patched_code)
             verified = verify_compilation(target_file)
             if not verified:
                 consecutive_errors += 1
@@ -135,10 +162,11 @@ def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = No
             consecutive_errors = 0
         else:
             with open(target_file, "w", encoding="utf-8") as f:
-                f.write(new_code)
+                f.write(patched_code)
 
-        current_code = new_code
-        evaluator_feedback = f"Step {step + 1}: code updated successfully."
+        original_lines = patched_lines
+        sec_end = sec_start + len(new_section.splitlines(keepends=False)) - 1
+        evaluator_feedback = f"Step {step + 1}: code section updated successfully."
         if logger:
             logger.log("INFO", f"Step {step + 1}: {evaluator_feedback}")
         step_entry["evaluator_feedback"] = evaluator_feedback
@@ -148,11 +176,12 @@ def run_iterative_loop(target_file: str, max_steps: int = 3, findings: list = No
     if logger:
         logger.log("INFO", f"Iterative loop completed after {len(step_log)} steps.")
 
+    final_code = "\n".join(original_lines)
     return {
         "success": len([s for s in step_log if s["result"] == "success"]) > 0,
-        "final_code": current_code,
+        "final_code": final_code,
         "steps": step_log,
-        "score": score_candidate(current_code, analyze_complexity(current_code)),
+        "score": score_candidate(final_code, analyze_complexity(final_code)),
     }
 
 
