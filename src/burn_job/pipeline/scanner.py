@@ -20,7 +20,7 @@ class ControllerScanner:
             return endpoints
 
         mapping_pattern = re.compile(
-            r'@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?(?:path\s*=\s*)?["\']([^"\']+)["\']',
+            r'@(Get|Post|Put|Delete|Patch|Request)Mapping(?:\s*\(\s*(?:value\s*=\s*)?(?:path\s*=\s*)?["\']([^"\']*)["\']|\s*\([^)]*\)|\s*)',
             re.IGNORECASE
         )
         class_name_pattern = re.compile(r'class\s+([A-Za-z0-9_]+)')
@@ -39,28 +39,45 @@ class ControllerScanner:
                     continue
 
                 class_name = f[:-5]
-                class_match = class_name_pattern.search(content)
-                if class_match:
-                    class_name = class_match.group(1)
+                class_line_idx = -1
 
+                for idx, line in enumerate(lines):
+                    cm = class_name_pattern.search(line)
+                    if cm:
+                        class_name = cm.group(1)
+                        class_line_idx = idx
+                        break
+
+                if class_line_idx == -1:
+                    continue
+
+                # Find base path from annotations above class definition
                 base_path = ""
-                base_match = mapping_pattern.search(content[:content.find("class ")]) if "class " in content else None
+                header_text = "".join(lines[:class_line_idx])
+                base_match = re.search(
+                    r'@(?:[A-Za-z0-9_]+Mapping)\s*\(\s*(?:value\s*=\s*)?(?:path\s*=\s*)?["\']([^"\']+)["\']',
+                    header_text,
+                    re.IGNORECASE
+                )
                 if base_match:
-                    base_path = base_match.group(2)
+                    base_path = base_match.group(1)
 
-                for idx, line in enumerate(lines, 1):
+                # Scan method mappings inside class body
+                for idx in range(class_line_idx + 1, len(lines)):
+                    line = lines[idx]
                     m = mapping_pattern.search(line)
                     if m:
                         http_verb = m.group(1).upper()
                         if http_verb == "REQUEST":
                             http_verb = "GET"
-                        sub_path = m.group(2)
-                        full_path = (base_path + sub_path).replace("//", "/")
+                        sub_path = m.group(2) if m.group(2) is not None else ""
+
+                        full_path = (base_path + "/" + sub_path).replace("//", "/")
                         if not full_path.startswith("/"):
                             full_path = "/" + full_path
 
                         method_name = "handlerMethod"
-                        for ahead in lines[idx:idx + 5]:
+                        for ahead in lines[idx + 1:idx + 6]:
                             mm = method_name_pattern.search(ahead)
                             if mm:
                                 method_name = mm.group(1)
@@ -72,7 +89,7 @@ class ControllerScanner:
                             controller_class=class_name,
                             method_name=method_name,
                             file_path=file_path,
-                            line_number=idx,
+                            line_number=idx + 1,
                         ))
 
         return endpoints

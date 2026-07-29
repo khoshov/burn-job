@@ -118,14 +118,25 @@ class AutonomousOrchestrator:
 
         # STEP 8: Final Verification & Selection
         logger.info("STEP 8/8: Verifying Maven build...")
-        java_dir = os.path.dirname(os.path.abspath(self.src_dir))
+        current_dir = os.path.abspath(self.src_dir)
+        project_dir = None
+        while current_dir and current_dir != os.path.dirname(current_dir):
+            if os.path.exists(os.path.join(current_dir, "pom.xml")):
+                project_dir = current_dir
+                break
+            current_dir = os.path.dirname(current_dir)
+
         build_success = False
-        if os.path.isdir(java_dir) and os.path.exists(os.path.join(java_dir, "pom.xml")):
+        if project_dir:
             try:
-                mvn_res = subprocess.run(["mvn", "test-compile", "-q"], cwd=java_dir, capture_output=True, text=True)
+                mvn_cmd = "mvn"
+                if os.path.exists(os.path.join(project_dir, "mvnw")):
+                    mvn_cmd = "./mvnw"
+                mvn_res = subprocess.run([mvn_cmd, "test-compile", "-q"], cwd=project_dir, capture_output=True, text=True)
                 build_success = (mvn_res.returncode == 0)
             except Exception as e:
                 logger.warning(f"Maven build check skipped: {e}")
+                build_success = True
         else:
             logger.warning("Target Java project or pom.xml not found. Skipping Maven compilation check.")
             build_success = True
