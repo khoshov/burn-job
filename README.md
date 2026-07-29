@@ -521,26 +521,28 @@ RETURN a, b, r.count, r.count / totalSamples * 100 AS percent
 
 ### Таблица всех fix вариантов
 
-| Дефект (type) | T | LLM Variant 1 | LLM Variant 2 | LLM Variant 3 |
+| Дефект (type) | T | LLM Variant 1 (Declarative / Spring) | LLM Variant 2 (Map Index / Batch) | LLM Variant 3 (Low-Overhead / Primitive) |
 |---|---|---|---|---|
-| N_PLUS_ONE_QUERIES | T6 | JOIN FETCH JPQL | @EntityGraph | DTO Projection | | SAVE_IN_LOOP_UNBATCHED | T6 | saveAll с JDBC batching | --- | --- |
-| FULL_FETCH_FOR_EXISTENCE_CHECK | T3 | COUNT query repository.existsBy() | --- | --- |
-| HEAVY_ENTITY_FETCH | T3 | Interface Projection | --- | --- |
-| IN_MEMORY_FILTERING | T8 | PageRequest | Slice (без COUNT) | --- |
-| LINEAR_SEARCH_IN_LOOP | T2 | Set lookup | HashMap index | --- |
-| QUADRATIC_NESTED_LOOP | T2 | Precompute Map index | Sort + linear pass | --- |
-| EXCESSIVE_STRING_CONCAT | T1 | StringBuilder | String.format | --- |
-| DUPLICATE_METHOD_BODY | T1 | Extract method | Strategy pattern | --- |
-| DEAD_OR_UNREACHABLE_CODE | T5 | Remove dead code | Add entry point | --- |
-| UNBOUNDED_CACHE_GROWTH | T7 | LRU LinkedHashMap | Caffeine maxSize | --- |
-| RETAINED_OBJECT_ACCUMULATION | T7 | WeakReference | Eviction policy | --- |
-| CONNECTION_POOL_STARVATION | T6 | Increase pool size | Reduce hold time | --- |
-| CPU_HOTSPOT_METHOD | T9 | Algorithmic change | Loop optimization | | MICROBENCHMARK_REGEX_COMPILE | T9 | Static Pattern field | --- | --- |
-| EXCESSIVE_STRING_ALLOCATIONS | T8 | StringBuilder reuse | Collectors.joining() | --- |
-| BOXED_WRAPPER_OVERHEAD | T4 | Primitive collections (fastutil) | Primitive IntStream | --- |
-| ARRAY_ALLOCATION_PRESSURE | T4 | Pre-size buffer | ThreadLocal pool | --- |
-| THREAD_LOCK_CONTENTION | T8 | ReadWriteLock | ConcurrentHashMap/Atomic | --- |
-| DUPLICATE_LAYER_VALIDATION | T5 | Consolidate validation | --- | --- |
+| `N_PLUS_ONE_QUERIES` | T6 | JOIN FETCH JPQL | @EntityGraph | DTO Projection |
+| `SAVE_IN_LOOP_UNBATCHED` | T1/T6 | repository.saveAll() | JDBC Batching | Native Bulk INSERT |
+| `REPEATED_DB_LOOKUP_IN_LOOP` | T1 | repository.findAllById() | Upfront HashMap Index | Cached Lookups |
+| `FULL_FETCH_FOR_EXISTENCE_CHECK` | T3 | repository.existsById() | COUNT(1) Query | Native EXISTS Query |
+| `HEAVY_ENTITY_FETCH` | T3 | Spring Interface Projection | Record DTO (SELECT new ...) | Native Query Tuple |
+| `IN_MEMORY_FILTERING` | T8 | WHERE clause in Spring Data | PageRequest | Slice (без COUNT) |
+| `LINEAR_SEARCH_IN_LOOP` | T2 | HashSet O(1) Lookup | HashMap Index | Pre-sorted Binary Search |
+| `QUADRATIC_NESTED_LOOP` | T2 | Precomputed Map Index | GroupingBy Stream | Sort + Two-pointer Pass |
+| `EXCESSIVE_STRING_CONCAT` | T1 | StringBuilder | String.join() | Pre-allocated Buffer |
+| `DUPLICATE_LAYER_VALIDATION` | T5 | Consolidate validation | Single Domain Assertion | Validation Decorator |
+| `DEAD_OR_UNREACHABLE_CODE` | T5 | Prune dead branches | Refactor guards | Consolidate logic |
+| `UNBOUNDED_CACHE_GROWTH` | T7 | Caffeine maxSize LRU | ExpireAfterWrite Cache | Bounded ConcurrentHashMap |
+| `RETAINED_OBJECT_ACCUMULATION` | T7 | WeakReference Eviction | Explicit Clear on Finish | ThreadLocal Cleanup |
+| `CONNECTION_POOL_STARVATION` | T6 | Shorten @Transactional | Increase Hikari Pool Size | Read-only Replica Routing |
+| `CPU_HOTSPOT_METHOD` | T9 | Algorithmic Memoization | Method Inlining | Fast Math / Array Loop |
+| `MICROBENCHMARK_REGEX_COMPILE` | T9 | Static Pattern Field | Pre-compiled Pattern | Primitive String.indexOf |
+| `EXCESSIVE_STRING_ALLOCATIONS` | T8 | StringBuilder Reuse | Collectors.joining() | CharSequence View |
+| `BOXED_WRAPPER_OVERHEAD` | T4 | Primitive arrays (int[]) | Primitive IntStream | FastUtil Primitive Collections |
+| `ARRAY_ALLOCATION_PRESSURE` | T4 | Pre-sized Capacity | ThreadLocal Buffer Pool | Direct ByteBuffer Reuse |
+| `THREAD_LOCK_CONTENTION` | T8/T9 | ConcurrentHashMap / Atomics | ReadWriteLock | StampedLock Optimistic Read |
 
 ### Примеры LLM-генерированных вариантов
 
