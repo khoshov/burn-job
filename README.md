@@ -14,6 +14,8 @@ DeepSeek — это внешняя LLM (языковая модель), кото
 
 **Принцип работы:** Burn Job находит дефекты производительности (T1–T9) rule-based методами (Cypher-запросы к графовой БД + статический анализ AST), затем для каждого дефекта отправляет код в DeepSeek, который предлагает 3 варианта исправления. Каждый вариант компилируется (`mvn compile`), запускается embedded Spring Boot и замеряется latency через Micrometer (`/actuator/metrics`). Победитель выбирается по наименьшему среднему времени ответа (avg latency). Все результаты сохраняются в `reports/sandbox/`.
 
+**О `test_project_light` в примерах ниже:** это минимальный синтетический проект (два-три класса) для быстрой обкатки пайплайна без поднятия PostgreSQL. Целевой проект хакатона — `test_project` (sensorhub), именно на нём выполняется реальный прогон и сдача результатов, см. `RUN.md` и `MANIFEST.md`.
+
 ---
 
 ### Шаг 1: Клонирование и подготовка окружения
@@ -262,7 +264,7 @@ source .venv/bin/activate
 
 ```bash
 # Markdown-отчёт с таблицами сравнения вариантов (читабельный, с подсветкой)
-cat reports/sandbox/detailed_report.md
+cat reports/sandbox/report.md
 
 # JSON-отчёт с машиночитаемыми данными (для интеграции в CI/CD или дашборды)
 cat reports/sandbox/findings.json
@@ -506,7 +508,7 @@ docker run --rm \
 
 ```
 burn-job/
-├── java/                          # Целевое Java-приложение
+├── test_project/                  # Целевое Java-приложение (sensorhub)
 │   ├── src/main/java/             # Исходники Java
 │   └── target/classes/            # Скомпилированные классы (javap-анализ)
 ├── src/burn_job/                  # Python-пакет оркестрации
@@ -585,7 +587,7 @@ pytest tests/ -v
 
 3. **Скомпилировать целевое Java-приложение**:
    ```bash
-   cd java
+   cd test_project
    mvn compile
    cd ..
    ```
@@ -619,7 +621,7 @@ cp .env.example .env
 
 ```env
 # Путь к проверяемому коду
-BURN_JOB_SRC_DIR=./java/src/main/java
+BURN_JOB_SRC_DIR=./test_project/src/main/java
 
 # Модель и backend LLM (auto, llama.cpp, vllm, openai)
 BURN_JOB_BACKEND=auto
@@ -630,7 +632,7 @@ BURN_JOB_MODEL_PATH=./Qwen3-4B/qwen3-4b-instruct.gguf
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|---------|
-| `BURN_JOB_SRC_DIR` | `./java/src/main/java` | Путь к директории проверяемого Java-кода |
+| `BURN_JOB_SRC_DIR` | `./test_project/src/main/java` | Путь к директории проверяемого Java-кода |
 | `BURN_JOB_DB_PATH` | `./profiler_graph.db` | Путь к файлу БД KùzuDB |
 | `BURN_JOB_PROFILE_PATH` | `./app_profiling_full.collapsed` | Путь к collapsed-файлу профайлера |
 | `BURN_JOB_LOG_PATH` | `./runlog/agent_run.log` | Путь к логу выполнения |
@@ -999,7 +1001,7 @@ SAVE_IN_LOOP_UNBATCHED, EXCESSIVE_STRING_CONCAT, LINEAR_SEARCH_IN_LOOP, HEAVY_EN
 **Детальное описание каждого этапа:**
 
 ### Этап 1: Сканирование эндпоинтов ⚙️
-- `ControllerScanner.scan_directory()` обходит `java/src/main/java`
+- `ControllerScanner.scan_directory()` обходит `test_project/src/main/java`
 - Ищет `@RestController`, `@Controller`, `@GetMapping`, `@PostMapping` и т.д.
 - Результат: `List[EndpointInfo]` — path, HTTP method, controller class, method name
 - **LLM не используется** — чистое regex-сканирование Java-исходников
@@ -1194,7 +1196,7 @@ def score_candidate(code, complexity_res):
 Оценка основана на AST-сложности (глубина вложенности, количество проблем, количество циклов). Это дешёвый способ отсечь заведомо некачественные варианты до Maven-верификации.
 
 ### Этап 7: Maven-верификация ⚙️
-- `verify_compilation()` запускает `mvn test-compile` в директории `java/`
+- `verify_compilation()` запускает `mvn test-compile` в директории `test_project/`
 - Если сборка не удалась: +1 к счётчику consecutive_errors
 - После **3 последовательных ошибок** -- `rolled_back_to_original` (восстановление исходного кода, завершение цикла)
 - Успешная сборка: обнуление счётчика, фиксация текущего варианта в `current_code`
@@ -1237,7 +1239,7 @@ Score = 0.6 * deltaLatency_p95 + 0.3 * deltaRPS + 0.1 * deltaGC
 
 Итоговый выбор: лучший вариант применяется к файлу. Если все варианты не прошли -- файл возвращается к исходному состоянию.
 
-### Итог: где LLM, а где нет### Итог: где LLM, а где нет
+### Итог: где LLM, а где нет
 
 | Этап | Название | LLM? | Механизм |
 |------|----------|:----:|----------|
@@ -1265,7 +1267,7 @@ Score = 0.6 * deltaLatency_p95 + 0.3 * deltaRPS + 0.1 * deltaGC
 burn-job --help
 
 # 1. Сканирование Spring RestControllers (вывод в Rich-таблицу)
-burn-job scan --src ./java/src/main/java
+burn-job scan --src ./test_project/src/main/java
 
 # 2. Инжест профиля async-profiler / JFR в KùzuDB
 burn-job ingest --profile ./app_profiling_full.collapsed --db ./profiler_graph.db
@@ -1310,7 +1312,7 @@ python -m burn_job.detectors.orchestrate \
 # С указанием classpath для статического call graph
 python -m burn_job.detectors.orchestrate \
   --db-path ./profiler_graph.db \
-  --classpath-dir ./java/target/classes
+  --classpath-dir ./test_project/target/classes
 ```
 
 ### Генерация findings.json
@@ -1326,10 +1328,10 @@ python -m burn_job.report.builder \
 
 ```bash
 # Статическая сложность кода
-python -m burn_job.detectors.complexity --file ./java/src/main/java/com/example/Service.java
+python -m burn_job.detectors.complexity --file ./test_project/src/main/java/com/example/Service.java
 
 # Object layout анализ
-python -m burn_job.detectors.object_layout ./java/src/main/java/com/example/Entity.java EntityName
+python -m burn_job.detectors.object_layout ./test_project/src/main/java/com/example/Entity.java EntityName
 
 # Дифференциальный анализ двух прогонов
 python -m burn_job.detectors.differential \
@@ -1338,7 +1340,7 @@ python -m burn_job.detectors.differential \
   --candidate-run-id run_2
 
 # Статический call graph
-python -m burn_job.detectors.callgraph ./java/target/classes --json
+python -m burn_job.detectors.callgraph ./test_project/target/classes --json
 ```
 
 ---
@@ -1354,7 +1356,7 @@ Score = 0.6 * ΔLatency_p95 + 0.3 * ΔRPS + 0.1 * ΔGC
 Где:
 - **ΔLatency_p95** — относительное изменение 95-го перцентиля задержки (нормализованное, 0..1)
 - **ΔRPS** — относительное изменение запросов в секунду (0..1)
-- **ΔRPS** — относительное изменение GC allocations (0..1)
+- **ΔGC** — относительное изменение GC allocations (0..1)
 
 Веса конфигурируются в `core/config.py`: `WEIGHT_LATENCY_P95`, `WEIGHT_RPS`, `WEIGHT_GC_ALLOC`.
 

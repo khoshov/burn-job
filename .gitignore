@@ -16,22 +16,22 @@ env/
 .coverage
 htmlcov/
 .env
-loadtest/
 
 # =============================================================================
 # Database & Profiler Outputs
 # =============================================================================
-*.db
-*.db-shm
-*.db-wal
-*.collapsed
-*.jfr
-runlog/
+# Anchored to repo root: loose scratch DB/profile files at top level are noise,
+# but the same file types are intentional evidence under measurements/ (see
+# SUBMISSION.md) and must stay trackable there.
+/*.db
+/*.db-shm
+/*.db-wal
+/*.collapsed
+/*.jfr
 
 # =============================================================================
 # Reports, Models & Artifacts
 # =============================================================================
-reports/
 profiler_graph.db
 *.jar
 *.safetensors
